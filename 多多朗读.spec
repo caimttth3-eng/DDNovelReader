@@ -54,8 +54,30 @@ _datas = [('assets/app.ico', 'assets')]
 if _tkinter_pkg:
     _datas.append((_tkinter_pkg, 'tkinter'))
 if _tcl_scripts:
+    # 裁剪 tcl8.6：跳过 tcltest 测试库
+    _tcl_skip = {'tcltest'}
+    for _d in sorted(os.listdir(_tcl_scripts)):
+        if _d in _tcl_skip:
+            continue
+        _sub = os.path.join(_tcl_scripts, _d)
+        if os.path.isdir(_sub):
+            for _f in os.listdir(_sub):
+                _datas.append((os.path.join(_sub, _f), os.path.join('tcl8.6', _d)))
+        else:
+            _datas.append((_sub, 'tcl8.6'))
     _datas.append((_tcl_scripts, 'tcl8.6'))
 if _tk_scripts:
+    # 裁剪 tk8.6：跳过 demos 示例
+    _tk_skip = {'demos'}
+    for _d in sorted(os.listdir(_tk_scripts)):
+        if _d in _tk_skip:
+            continue
+        _sub = os.path.join(_tk_scripts, _d)
+        if os.path.isdir(_sub):
+            for _f in os.listdir(_sub):
+                _datas.append((os.path.join(_sub, _f), os.path.join('tk8.6', _d)))
+        else:
+            _datas.append((_sub, 'tk8.6'))
     _datas.append((_tk_scripts, 'tk8.6'))
 
 # --- 组装 binaries（二进制/DLL）---
@@ -70,7 +92,14 @@ _hiddenimports = [
     'tkinter.messagebox', 'tkinter.scrolledtext', 'tkinter.colorchooser',
     'tkinter.simpledialog', 'tkinter.dnd', '_tkinter',
     'pyttsx3.drivers', 'pyttsx3.drivers.sapi5',
-    'edge_tts', 'aiohttp', 'pygame',
+    'edge_tts', 'aiohttp',
+]
+
+# --- excludes：排除用不到的标准库/测试模块，进一步瘦身 ---
+_excludes = [
+    'pygame', 'unittest', 'pydoc', 'doctest', 'idlelib', 'lib2to3',
+    'sqlite3', 'ensurepip', 'venv', 'wsgiref', 'xmlrpc',
+    'tkinter.test', 'ctypes.test', 'test',
 ]
 
 a = Analysis(
@@ -82,7 +111,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['runtime_hook_tkinter.py'],
-    excludes=[],
+    excludes=_excludes,
     noarchive=False,
     optimize=0,
 )

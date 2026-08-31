@@ -211,7 +211,10 @@ class NovelReaderApp:
         self._shelf_size_stop.clear()
 
         books = self.storage.all_books()
-        bids = list(books.keys())
+        # 仅对缺失持久化缓存大小的书（老数据迁移）做一次后台校准；其余零扫描
+        bids = [k for k in books if not self.storage.has_cache_size(k)]
+        if not bids:
+            return
 
         def worker():
             for bid in bids:
@@ -219,6 +222,7 @@ class NovelReaderApp:
                     return
                 try:
                     sz = self._book_total_cache_size(bid)
+                    self.storage.set_book_cache_size(bid, sz)
                     self._shelf_size_cache[bid] = sz
                     # 通过 root.after 回到主线程更新 UI
                     self.root.after(0, lambda b=bid, s=sz: self._update_shelf_size_cell(b, s))
@@ -250,6 +254,11 @@ class NovelReaderApp:
                     shutil.rmtree(d, ignore_errors=True)
                 except Exception:
                     pass
+        except Exception:
+            pass
+        try:
+            self.storage.set_book_cache_size(bid, 0)
+            self._shelf_size_cache[bid] = 0
         except Exception:
             pass
 
@@ -705,8 +714,11 @@ class NovelReaderApp:
         for b in books.values():
             prog = b.get("progress") or {}
             pct = prog.get("percent", 0)
-            # 使用缓存的大小值，避免同步遍历文件系统导致UI卡死
-            csize = self._shelf_size_cache.get(b["id"])
+            # 优先内存实时值，其次持久化值；缺失（老数据）显示…，由后台一次性校准
+            bid_i = b["id"]
+            csize = self._shelf_size_cache.get(bid_i)
+            if csize is None:
+                csize = self.storage.book_cache_size(bid_i)
             if csize is None:
                 csize = 0
                 size_s = "…"
@@ -2019,11 +2031,30 @@ class NovelReaderApp:
         self.root.after(100, self._poll_tts)
 
     def _update_book_cache_ui(self):
-        """更新「整本缓存」按钮与状态栏进度。"""
+        """更新「整本缓存」按钮与状态栏进度，并实时持久化缓存大小。"""
         try:
             st = self.tts.book_cache_status()
         except Exception:
             st = None
+        if st and self.current_bid:
+            try:
+                bid = self.current_bid
+                total = getattr(self, "_book_cache_base_size", 0) + int(
+                    st.get("bytes_written", 0)
+                )
+                self._shelf_size_cache[bid] = total
+                state = st["state"]
+                now = time.time()
+                last = getattr(self, "_book_cache_last_persist", 0)
+                if state in ("paused", "done", "cancelled"):
+                    self.storage.set_book_cache_size(bid, total)
+                    self._book_cache_last_persist = now
+                elif state == "caching" and now - last > 5:
+                    # 缓存进行中每 5 秒持久化一次，避免频繁写 library.json
+                    self.storage.set_book_cache_size(bid, total)
+                    self._book_cache_last_persist = now
+            except Exception:
+                pass
         if not st:
             self.tts_cache_btn.configure(text="整本缓存")
             self.book_cache_label.configure(text="")
@@ -2218,6 +2249,7 @@ class NovelReaderApp:
         st = self.tts.start_book_cache(self.book, self.current_bid, idx)
         if st is None:
             return
+        self._book_cache_base_size = self.storage.book_cache_size(self.current_bid)
         if st["state"] == "unsupported":
             messagebox.showinfo(
                 "提示",
@@ -2259,6 +2291,7 @@ class NovelReaderApp:
         st = self.tts.start_book_cache(self.book, self.current_bid, None, resume=True)
         if st is None:
             return
+        self._book_cache_base_size = self.storage.book_cache_size(self.current_bid)
         if st.get("state") == "unsupported":
             messagebox.showinfo(
                 "提示",

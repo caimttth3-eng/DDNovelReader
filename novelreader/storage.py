@@ -188,6 +188,30 @@ class Storage:
         b["last_read_at"] = time.time()
         self.save()
 
+    # ---------- 缓存大小持久化（避免每次刷新书架遍历文件系统） ----------
+    def book_cache_size(self, bid):
+        """读取持久化的书籍总缓存大小（字节），不扫描文件系统。"""
+        b = self.data["books"].get(bid)
+        if not b:
+            return 0
+        try:
+            return int(b.get("cache_size", 0) or 0)
+        except Exception:
+            return 0
+
+    def has_cache_size(self, bid):
+        """是否已有持久化的缓存大小（缺失表示老数据，需一次性校准）。"""
+        b = self.data["books"].get(bid)
+        return bool(b) and "cache_size" in b
+
+    def set_book_cache_size(self, bid, size):
+        """持久化书籍总缓存大小。"""
+        b = self.data["books"].get(bid)
+        if not b:
+            return
+        b["cache_size"] = int(size)
+        self.save()
+
     # ---------- 解析缓存 ----------
     def cache_path(self, bid):
         custom = self.data.get("settings", {}).get("cache_dir", "")

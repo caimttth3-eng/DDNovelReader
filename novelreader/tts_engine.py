@@ -16,8 +16,6 @@ v3 新增双后端：
 import os
 import json
 
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-
 import asyncio
 import queue
 import re
@@ -35,11 +33,13 @@ try:
 except Exception:  # pragma: no cover
     edge_tts = None
 
-try:
-    import pygame
-except Exception:  # pragma: no cover
-    pygame = None
+import ctypes
+from ctypes import wintypes
 
+try:
+    import pyttsx3
+except Exception:  # pragma: no cover
+    pyttsx3 = None
 from .textproc import clean_to_orig, orig_to_clean
 
 _SENT_END = re.compile(r"(?<=[。！？!?；;])")
@@ -211,6 +211,7 @@ class WholeBookCacher:
         self._auto_shutdown = False
         self._shutdown_posted = False
         self._last_save = 0
+        self._bytes_written = 0  # 本轮实际写入的音频字节（持久化大小用）
 
     def _progress_path(self):
         return os.path.join(self._dir, "progress.json")
@@ -432,6 +433,8 @@ class WholeBookCacher:
             with open(tmp, "wb") as f:
                 f.write(audio)
             os.replace(tmp, final)
+            with self._lock:
+                self._bytes_written += len(audio)
         except Exception:
             pass
 
@@ -456,7 +459,8 @@ class WholeBookCacher:
 
     def status(self):
         with self._lock:
-            return {"state": self._state, "done": self._done, "total": self._total}
+            return {"state": self._state, "done": self._done, "total": self._total,
+                    "bytes_written": self._bytes_written}
 
 
 class SpeechController:
@@ -973,40 +977,40 @@ class SpeechController:
         return self._speak_sapi(text, gen)
 
     def _speak_edge_play(self, audio, gen):
-        """用 pygame 播放预生成的 MP3，支持暂停/停止。"""
-        if not audio or pygame is None:
+        """用 Windows MCI（winmm.dll）播放预生成的 MP3，支持暂停/停止（零第三方依赖）。"""
+        if not audio:
             return False
         tmp_path = None
         try:
-            if pygame.mixer.get_init() is None:
-                pygame.mixer.init()
             tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
             tmp_path = tmp.name
             tmp.write(audio)
             tmp.flush()
             tmp.close()
-            pygame.mixer.music.load(tmp_path)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
+            _mci_open(tmp_path)
+            _mci_play()
+            while _mci_playing():
                 with self._cv:
                     if self._state == "idle" or self._book is None or self._gen != gen:
-                        pygame.mixer.music.stop()
+                        _mci_stop()
                         break
                     if self._state == "paused":
-                        pygame.mixer.music.pause()
+                        _mci_pause()
                         self._cv.wait()
                         if self._state == "idle" or self._book is None or self._gen != gen:
-                            pygame.mixer.music.stop()
+                            _mci_stop()
                             break
-                        pygame.mixer.music.unpause()
+                        _mci_resume()
                 time.sleep(0.03)
+            _mci_close()
             return True
         except Exception as e:
             self._post({"type": "error", "message": f"播放出错：{e}"})
             return False
         finally:
             try:
-                pygame.mixer.music.stop()
+                _mci_stop()
+                _mci_close()
             except Exception:
                 pass
             if tmp_path:
@@ -1014,3 +1018,50 @@ class SpeechController:
                     os.unlink(tmp_path)
                 except Exception:
                     pass
+
+
+# ---------- Windows MCI 播放器（winmm.dll，替代 pygame，零依赖） ----------
+_MCI_ALIAS = "dd_tts_player"
+
+
+def _mci_send(cmd):
+    """发送 MCI 命令，返回 (错误码, 返回文本)。"""
+    buf = ctypes.create_unicode_buffer(512)
+    err = ctypes.windll.winmm.mciSendStringW(cmd, buf, 512, 0)
+    return err, buf.value
+
+
+def _mci_open(path):
+    _mci_close()
+    cmd = f'open "{path}" type mpegvideo alias {_MCI_ALIAS}'
+    err, _ = _mci_send(cmd)
+    if err != 0:
+        raise RuntimeError(f"MCI open 失败 code={err}")
+
+
+def _mci_play():
+    _mci_send(f"play {_MCI_ALIAS}")
+
+
+def _mci_pause():
+    _mci_send(f"pause {_MCI_ALIAS}")
+
+
+def _mci_resume():
+    _mci_send(f"play {_MCI_ALIAS}")
+
+
+def _mci_stop():
+    _mci_send(f"stop {_MCI_ALIAS}")
+
+
+def _mci_close():
+    _mci_send(f"close {_MCI_ALIAS}")
+
+
+def _mci_playing():
+    """查询是否仍在播放/暂停中。自然播放结束返回 False。"""
+    _, mode = _mci_send(f"status {_MCI_ALIAS} mode")
+    mode = mode.strip().lower()
+    return mode in ("playing", "paused")
+

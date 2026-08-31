@@ -110,3 +110,9 @@ requirements.txt        # Python 依赖
 ## 许可证
 
 MIT License
+
+## v1.96 更新（2026-09-01）
+
+- 修复启动慢与硬盘持续被读取：书架「大小」列改为持久化索引（library.json），启动/刷新零扫描
+- 音频播放器改为 Windows 原生 MCI，移除 pygame 依赖
+- 安装包瘦身：49.6MB → 35.5MB（UPX 压缩 + 排除无用模块）

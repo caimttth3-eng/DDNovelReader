@@ -41,3 +41,11 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# 安卓 Flutter 工程（独立工程，另行发布）
+dd_novel_reader/
+downloads/
+
+# 临时测试/调试文件
+/_as_page.html
+/_flutter_ver.json
