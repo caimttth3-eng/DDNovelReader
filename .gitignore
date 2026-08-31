@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec.bak
+
+# 打包好的 exe（太大，不放 git，通过 GitHub Release 分发）
+releases/
+
+# 临时测试 spec（保留正式的 多多朗读.spec）
+_min_*.spec
+小说阅读器.spec
+
+# 临时文件（根目录下的 _ 开头文件，但不误伤包的 __init__.py）
+/_*.png
+/_*.txt
+/_*.py
+/_exe_*.txt
+
+# 日志
+*.log
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
