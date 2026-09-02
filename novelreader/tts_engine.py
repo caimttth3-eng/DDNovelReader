@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """TTS 朗读引擎（v3）。
 
 v3 新增双后端：
@@ -34,6 +34,11 @@ except Exception:  # pragma: no cover
     edge_tts = None
 
 import ctypes
+try:
+    from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+    _HAS_PYCAW = True
+except Exception:
+    _HAS_PYCAW = False
 from ctypes import wintypes
 
 try:
@@ -540,6 +545,19 @@ class SpeechController:
         with self._cv:
             self._sentence_gap = max(0.0, float(gap))
 
+    def set_volume(self, volume):
+        """设置本程序音量（0-100），即时应用到当前进程音频会话。"""
+        self._volume = max(0, min(100, int(volume)))
+        # 优先使用 Core Audio（pycaw），失败则回退 MCI
+        if not _set_process_volume(self._volume):
+            try:
+                _mci_set_volume(self._volume)
+            except Exception:
+                pass
+
+    def get_volume(self):
+        return self._volume
+
     def prefetch_progress(self):
         """返回 Edge 后端当前预取缓存进度 (已缓存句数, 上限)；非 Edge 或未朗读返回 None。"""
         with self._cv:
@@ -821,11 +839,13 @@ class SpeechController:
                     off = 0
                     self._post({"type": "chapter", "chapter_idx": ci})
                     continue
-                text, next_clean = self._next_chunk(clean_text, clean_off)
+                text, next_clean, sent_start = self._next_chunk(clean_text, clean_off)
                 if not text:
                     off = len(orig_content)
                     continue
-                orig_off = clean_to_orig(cmap, clean_off, len(orig_content))
+                # 用当前句文本的实际起始位置（跳过句前空白），而不是 clean_off
+                actual_clean_off = clean_off + sent_start
+                orig_off = clean_to_orig(cmap, actual_clean_off, len(orig_content))
                 self._post(
                     {
                         "type": "sentence_start",
@@ -871,12 +891,12 @@ class SpeechController:
         seg = content[offset:]
         frags = split_sentences(seg)
         if not frags:
-            return "", len(content)
+            return "", len(content), 0
         text = frags[0]
         start = seg.find(text)
         if start < 0:
-            return text, offset + len(text)
-        return text, offset + start + len(text)
+            return text, offset + len(text), 0
+        return text, offset + start + len(text), start
 
     # ---------- SAPI 后端 ----------
     def _speak_sapi(self, text, gen):
@@ -988,6 +1008,8 @@ class SpeechController:
             tmp.flush()
             tmp.close()
             _mci_open(tmp_path)
+            _mci_set_volume(self._volume)  # MCI 层音量（回退）
+            _set_process_volume(self._volume)  # Core Audio 进程音量（主要）
             _mci_play()
             while _mci_playing():
                 with self._cv:
@@ -1037,6 +1059,30 @@ def _mci_open(path):
     err, _ = _mci_send(cmd)
     if err != 0:
         raise RuntimeError(f"MCI open 失败 code={err}")
+
+
+def _mci_set_volume(volume_0_100):
+    """设置 MCI 音量（0-100 -> 0-1000）。"""
+    v = max(0, min(1000, int(volume_0_100 * 10)))
+    _mci_send(f"setaudio {_MCI_ALIAS} volume to {v}")
+
+
+def _set_process_volume(volume_0_100):
+    """通过 Windows Core Audio 设置当前进程音量（0-100）。优先使用 pycaw。"""
+    if not _HAS_PYCAW:
+        return False
+    try:
+        volume = max(0.0, min(1.0, volume_0_100 / 100.0))
+        pid = ctypes.windll.kernel32.GetCurrentProcessId()
+        sessions = AudioUtilities.GetAllSessions()
+        for s in sessions:
+            if s.ProcessId == pid:
+                vol = s._ctl.QueryInterface(ISimpleAudioVolume)
+                vol.SetMasterVolume(volume, None)
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _mci_play():

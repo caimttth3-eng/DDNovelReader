@@ -50,34 +50,16 @@ for _root in (_venv, _base_py):
             _tk_scripts = _ck
 
 # --- 组装 datas（数据文件）---
-_datas = [('assets/app.ico', 'assets')]
+_datas = [('assets/app.ico', 'assets'), ('assets/skins', 'assets/skins')]
+# tkinterdnd2 的 tkdnd 二进制（只打包 win-x64，减小包体）
+_tkdnd_dir = os.path.join(_sp, 'tkinterdnd2', 'tkdnd', 'win-x64')
+if os.path.isdir(_tkdnd_dir):
+    _datas.append((_tkdnd_dir, 'tkinterdnd2/tkdnd/win-x64'))
 if _tkinter_pkg:
     _datas.append((_tkinter_pkg, 'tkinter'))
 if _tcl_scripts:
-    # 裁剪 tcl8.6：跳过 tcltest 测试库
-    _tcl_skip = {'tcltest'}
-    for _d in sorted(os.listdir(_tcl_scripts)):
-        if _d in _tcl_skip:
-            continue
-        _sub = os.path.join(_tcl_scripts, _d)
-        if os.path.isdir(_sub):
-            for _f in os.listdir(_sub):
-                _datas.append((os.path.join(_sub, _f), os.path.join('tcl8.6', _d)))
-        else:
-            _datas.append((_sub, 'tcl8.6'))
     _datas.append((_tcl_scripts, 'tcl8.6'))
 if _tk_scripts:
-    # 裁剪 tk8.6：跳过 demos 示例
-    _tk_skip = {'demos'}
-    for _d in sorted(os.listdir(_tk_scripts)):
-        if _d in _tk_skip:
-            continue
-        _sub = os.path.join(_tk_scripts, _d)
-        if os.path.isdir(_sub):
-            for _f in os.listdir(_sub):
-                _datas.append((os.path.join(_sub, _f), os.path.join('tk8.6', _d)))
-        else:
-            _datas.append((_sub, 'tk8.6'))
     _datas.append((_tk_scripts, 'tk8.6'))
 
 # --- 组装 binaries（二进制/DLL）---
@@ -93,6 +75,8 @@ _hiddenimports = [
     'tkinter.simpledialog', 'tkinter.dnd', '_tkinter',
     'pyttsx3.drivers', 'pyttsx3.drivers.sapi5',
     'edge_tts', 'aiohttp',
+    'pycaw', 'pycaw.pycaw', 'pycaw.api', 'comtypes', 'psutil',
+    'tkinterdnd2',
 ]
 
 # --- excludes：排除用不到的标准库/测试模块，进一步瘦身 ---

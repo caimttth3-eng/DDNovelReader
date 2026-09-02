@@ -1,5 +1,10 @@
 pyttsx3>=2.90
-PyMuPDF>=1.24
+pypdfium2>=4.0
 python-docx>=1.1
 charset-normalizer>=3.0
 mobi>=0.4.1
+edge-tts>=6.0
+pycaw>=20230407
+comtypes>=1.2
+psutil>=5.9
+tkinterdnd2>=0.4

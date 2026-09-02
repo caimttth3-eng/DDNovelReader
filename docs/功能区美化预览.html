@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多多朗读 · 功能区按钮美化方案预览</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "微软雅黑", sans-serif; background: #EDEAE3; padding: 24px; color: #333; }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .sub { color: #777; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 18px; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .card-head .no { width: 26px; height: 26px; border-radius: 50%; background: #333; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; }
+  .card-head h2 { font-size: 16px; }
+  .card-head .tag { font-size: 11px; color: #fff; padding: 2px 8px; border-radius: 10px; }
+  .desc { font-size: 12px; color: #888; margin: 4px 0 14px; }
+  /* 模拟功能区布局 */
+  .toolbar { border-radius: 8px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; border: 1px solid rgba(0,0,0,.06); }
+  .btn { border: 1px solid; border-radius: 5px; padding: 5px 14px; font-size: 13px; cursor: pointer; user-select: none; font-family: "Microsoft YaHei"; line-height: 1.3; transition: none; }
+  .btn.w2 { padding: 5px 8px; }
+  .sep { width: 1px; height: 20px; background: rgba(0,0,0,.15); }
+  .lbl { font-size: 12px; color: #999; margin-right: 2px; }
+  .swatch { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .sw { padding: 2px 8px; font-size: 11px; border-radius: 4px; border: 1px solid rgba(0,0,0,.08); }
+  pre { background: #f6f6f4; border: 1px solid #e6e2da; border-radius: 6px; padding: 10px; font-size: 11px; overflow-x: auto; line-height: 1.5; font-family: Consolas, monospace; }
+  .note { font-size: 12px; color: #b58900; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>多多朗读 · 功能区按钮美化方案（ttk.Style 静态样式）</h1>
+<div class="sub">纯静态样式，无动画，开销≈0；鼠标悬停/按下有效果反馈。将鼠标移到按钮上可预览悬停状态。</div>
+
+<div class="grid">
+
+<!-- ============ 方案 A ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">A</div><h2>米黄阅读</h2><span class="tag" style="background:#B5A67F;">温暖护眼</span></div>
+  <div class="desc">呼应已选定的米黄主题 #DCD1B5，暖色调护眼，阅读器氛围最统一</div>
+  <div class="toolbar" style="background:#C8BC9E; border-color:#B5A67F;">
+    <span class="btn" style="background:#EFE6CE; color:#4A3B20; border-color:#B5A67F;">◀ 上一章</span>
+    <span class="btn" style="background:#EFE6CE; color:#4A3B20; border-color:#B5A67F;">下一章 ▶</span>
+    <span class="sep" style="background:#9c8f6e;"></span>
+    <span class="lbl" style="color:#5a4c2e;">书架</span>
+    <span class="btn" style="background:#E8C87A; color:#2A1F0E; border-color:#B5A67F; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#EFE6CE; color:#4A3B20; border-color:#B5A67F;">⏹ 结束</span>
+    <span class="btn" style="background:#EFE6CE; color:#4A3B20; border-color:#B5A67F;">关于</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#EFE6CE;color:#4A3B20;">按钮底 #EFE6CE</span>
+    <span class="sw" style="background:#E8C87A;color:#2A1F0E;">悬停 #E8C87A</span>
+    <span class="sw" style="background:#D8B75E;color:#2A1F0E;">按下 #D8B75E</span>
+    <span class="sw" style="background:#C8BC9E;color:#3a2f18;">栏底 #C8BC9E</span>
+  </div>
+  <pre>style.theme_use("clam")
+style.configure("TButton",
+  background="#EFE6CE", foreground="#4A3B20",
+  bordercolor="#B5A67F", relief="flat", padding=(10,5),
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("pressed","#D8B75E"), ("active","#E8C87A")])</pre>
+</div>
+
+<!-- ============ 方案 B ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">B</div><h2>深色夜间</h2><span class="tag" style="background:#3A3A40;">夜间阅读</span></div>
+  <div class="desc">深灰低亮度界面，配合夜间主题不刺眼，适合长期阅读</div>
+  <div class="toolbar" style="background:#2B2B2E; border-color:#3a3a40;">
+    <span class="lbl" style="color:#999;">◀ 上一章</span>
+    <span class="btn" style="background:#3A3A40; color:#D8D8D8; border-color:#55555E;">上一章</span>
+    <span class="btn" style="background:#3A3A40; color:#D8D8D8; border-color:#55555E;">下一章 ▶</span>
+    <span class="sep" style="background:#55555E;"></span>
+    <span class="btn" style="background:#3A3A40; color:#D8D8D8; border-color:#55555E;">书架</span>
+    <span class="btn" style="background:#50505A; color:#FFFFFF; border-color:#6A6A76; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#3A3A40; color:#D8D8D8; border-color:#55555E;">⏹ 结束</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#3A3A40;color:#D8D8D8;">按钮底 #3A3A40</span>
+    <span class="sw" style="background:#50505A;color:#fff;">悬停 #50505A</span>
+    <span class="sw" style="background:#26262C;color:#aaa;">按下 #26262C</span>
+    <span class="sw" style="background:#2B2B2E;color:#ccc;">栏底 #2B2B2E</span>
+  </div>
+  <pre>style.theme_use("clam")
+style.configure("TButton",
+  background="#3A3A40", foreground="#D8D8D8",
+  bordercolor="#55555E", relief="flat", padding=(10,5),
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("pressed","#26262C"), ("active","#50505A")],
+  foreground=[("disabled","#777777")])</pre>
+</div>
+
+<!-- ============ 方案 C ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">C</div><h2>清爽浅蓝</h2><span class="tag" style="background:#4A90D9;">现代简洁</span></div>
+  <div class="desc">浅色底 + 蓝色强调，干净利落的现代办公风，辨识度高</div>
+  <div class="toolbar" style="background:#F0F2F5; border-color:#DCE0E6;">
+    <span class="btn" style="background:#FFFFFF; color:#2C3E50; border-color:#D0D6DE;">◀ 上一章</span>
+    <span class="btn" style="background:#FFFFFF; color:#2C3E50; border-color:#D0D6DE;">下一章 ▶</span>
+    <span class="sep" style="background:#D0D6DE;"></span>
+    <span class="btn" style="background:#FFFFFF; color:#2C3E50; border-color:#D0D6DE;">书架</span>
+    <span class="btn" style="background:#4A90D9; color:#FFFFFF; border-color:#3A7CC4; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#FFFFFF; color:#2C3E50; border-color:#D0D6DE;">⏹ 结束</span>
+    <span class="btn" style="background:#FFFFFF; color:#2C3E50; border-color:#D0D6DE;">关于</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#FFFFFF;color:#2C3E50;border-color:#D0D6DE;">按钮底 #FFF</span>
+    <span class="sw" style="background:#E3F0FF;color:#2C3E50;">悬停 #E3F0FF</span>
+    <span class="sw" style="background:#4A90D9;color:#fff;">主按钮 #4A90D9</span>
+    <span class="sw" style="background:#F0F2F5;color:#2C3E50;">栏底 #F0F2F5</span>
+  </div>
+  <pre>style.theme_use("clam")
+style.configure("TButton",
+  background="#FFFFFF", foreground="#2C3E50",
+  bordercolor="#D0D6DE", relief="flat", padding=(10,5),
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("pressed","#D6E9FF"), ("active","#E3F0FF")],
+  bordercolor=[("active","#4A90D9")])</pre>
+</div>
+
+<!-- ============ 方案 D ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">D</div><h2>原生微调</h2><span class="tag" style="background:#888;">最贴近系统</span></div>
+  <div class="desc">保留 Windows 原生观感，只统一间距圆角、微调悬停高亮，改动最小最稳妥</div>
+  <div class="toolbar" style="background:#F3F3F3; border-color:#DDD;">
+    <span class="btn" style="background:#F0F0F0; color:#1E1E1E; border-color:#D0D0D0;">◀ 上一章</span>
+    <span class="btn" style="background:#F0F0F0; color:#1E1E1E; border-color:#D0D0D0;">下一章 ▶</span>
+    <span class="sep" style="background:#D0D0D0;"></span>
+    <span class="btn" style="background:#F0F0F0; color:#1E1E1E; border-color:#D0D0D0;">书架</span>
+    <span class="btn" style="background:#E5F1FB; color:#1E1E1E; border-color:#99C4E8; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#F0F0F0; color:#1E1E1E; border-color:#D0D0D0;">⏹ 结束</span>
+    <span class="btn" style="background:#F0F0F0; color:#1E1E1E; border-color:#D0D0D0;">关于</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#F0F0F0;color:#1E1E1E;border-color:#D0D0D0;">按钮底 #F0F0F0</span>
+    <span class="sw" style="background:#E5F1FB;color:#1E1E1E;">悬停 #E5F1FB</span>
+    <span class="sw" style="background:#F3F3F3;color:#1E1E1E;">栏底 #F3F3F3</span>
+  </div>
+  <pre># 不切换主题，直接在原生主题上微调
+style.configure("TButton", padding=(8,5), relief="flat",
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("active","#E5F1FB"), ("pressed","#DCEBF7")])</pre>
+</div>
+
+<!-- ============ 方案 E ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">E</div><h2>青绿科技</h2><span class="tag" style="background:#1ABC9C;">沉稳科技</span></div>
+  <div class="desc">深底 + 青绿强调，视觉沉稳有科技感，夜间与阅读区对比清晰</div>
+  <div class="toolbar" style="background:#1E2A32; border-color:#2C3E50;">
+    <span class="lbl" style="color:#7a8b96;">◀ 上一章</span>
+    <span class="btn" style="background:#2C3E50; color:#EAF6F5; border-color:#3D566E;">上一章</span>
+    <span class="btn" style="background:#2C3E50; color:#EAF6F5; border-color:#3D566E;">下一章 ▶</span>
+    <span class="sep" style="background:#3D566E;"></span>
+    <span class="btn" style="background:#2C3E50; color:#EAF6F5; border-color:#3D566E;">书架</span>
+    <span class="btn" style="background:#1ABC9C; color:#062B24; border-color:#16A085; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#2C3E50; color:#EAF6F5; border-color:#3D566E;">⏹ 结束</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#2C3E50;color:#EAF6F5;">按钮底 #2C3E50</span>
+    <span class="sw" style="background:#1ABC9C;color:#062B24;">强调 #1ABC9C</span>
+    <span class="sw" style="background:#34495E;color:#EAF6F5;">悬停 #34495E</span>
+    <span class="sw" style="background:#1E2A32;color:#EAF6F5;">栏底 #1E2A32</span>
+  </div>
+  <pre>style.theme_use("clam")
+style.configure("TButton",
+  background="#2C3E50", foreground="#EAF6F5",
+  bordercolor="#3D566E", relief="flat", padding=(10,5),
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("pressed","#233240"), ("active","#34495E")])</pre>
+</div>
+
+<!-- ============ 方案 F ============ -->
+<div class="card">
+  <div class="card-head"><div class="no">F</div><h2>豆沙暖粉</h2><span class="tag" style="background:#C97B63;">温柔治愈</span></div>
+  <div class="desc">豆沙粉 + 暖米色，柔和治愈系，不刺眼，适合休闲阅读氛围</div>
+  <div class="toolbar" style="background:#F7EDE9; border-color:#E6D3CB;">
+    <span class="btn" style="background:#FBF4F1; color:#5C4038; border-color:#E0C7BC;">◀ 上一章</span>
+    <span class="btn" style="background:#FBF4F1; color:#5C4038; border-color:#E0C7BC;">下一章 ▶</span>
+    <span class="sep" style="background:#E0C7BC;"></span>
+    <span class="btn" style="background:#FBF4F1; color:#5C4038; border-color:#E0C7BC;">书架</span>
+    <span class="btn" style="background:#C97B63; color:#FFF; border-color:#B56A54; font-weight:bold;">▶ 开始朗读</span>
+    <span class="btn" style="background:#FBF4F1; color:#5C4038; border-color:#E0C7BC;">⏹ 结束</span>
+    <span class="btn" style="background:#FBF4F1; color:#5C4038; border-color:#E0C7BC;">关于</span>
+  </div>
+  <div class="swatch">
+    <span class="sw" style="background:#FBF4F1;color:#5C4038;border-color:#E0C7BC;">按钮底 #FBF4F1</span>
+    <span class="sw" style="background:#F3C9BE;color:#5C4038;">悬停 #F3C9BE</span>
+    <span class="sw" style="background:#C97B63;color:#fff;">主按钮 #C97B63</span>
+    <span class="sw" style="background:#F7EDE9;color:#5C4038;">栏底 #F7EDE9</span>
+  </div>
+  <pre>style.theme_use("clam")
+style.configure("TButton",
+  background="#FBF4F1", foreground="#5C4038",
+  bordercolor="#E0C7BC", relief="flat", padding=(10,5),
+  font=("微软雅黑", 9))
+style.map("TButton",
+  background=[("pressed","#E8B0A2"), ("active","#F3C9BE")])</pre>
+</div>
+
+</div>
+<div class="note" style="margin-top:16px;">提示：方案 A 与已选定的「米黄·截图款」阅读主题配色最统一；ttk.Style 需配合 <b>theme_use("clam")</b> 才能自定义按钮背景色（vista 主题不支持改背景）。</div>
+</body>
+</html>

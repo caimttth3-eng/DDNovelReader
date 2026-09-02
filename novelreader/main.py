@@ -74,7 +74,13 @@ def main():
 
     from novelreader.gui import NovelReaderApp
 
-    root = tk.Tk()
+    # 优先用 tkinterdnd2（原生拖拽，事件在主线程，稳定不闪退）
+    # 不可用时降级为普通 Tk，拖拽功能不可用但不影响其他功能
+    try:
+        from tkinterdnd2 import TkinterDnD
+        root = TkinterDnD.Tk()
+    except Exception:
+        root = tk.Tk()
     NovelReaderApp(root)
     root.mainloop()
 

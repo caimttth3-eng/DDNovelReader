@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多多朗读 · 软件图标挑选</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:#1e1e24; color:#e8e8ea; padding:24px; }
+  h1 { font-size:22px; margin-bottom:6px; }
+  .sub { color:#9a9aa3; font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; }
+  .card { background:#2a2a33; border-radius:12px; padding:14px; cursor:pointer; text-align:center; transition:transform .15s, box-shadow .15s; border:2px solid transparent; }
+  .card:hover { transform:translateY(-3px); box-shadow:0 6px 18px rgba(0,0,0,.35); }
+  .card.sel { border-color:#2f7cf6; box-shadow:0 0 0 2px rgba(47,124,246,.35); }
+  .thumb { width:120px; height:120px; margin:0 auto 10px; border-radius:16px; overflow:hidden; background:#000; display:flex; align-items:center; justify-content:center; }
+  .thumb img { width:100%; height:100%; object-fit:cover; }
+  .name { font-size:14px; font-weight:600; margin-bottom:4px; }
+  .desc { font-size:12px; color:#9a9aa3; line-height:1.5; min-height:36px; }
+  .idx { font-size:12px; color:#6a6a75; margin-bottom:6px; }
+  .bar { margin-top:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .btn { padding:8px 18px; border:none; border-radius:8px; font-size:14px; cursor:pointer; }
+  .btn.primary { background:#2f7cf6; color:#fff; }
+  .btn.ghost { background:#3a3a44; color:#e8e8ea; }
+  #picked { font-size:13px; color:#cfcfd6; }
+</style>
+</head>
+<body>
+<h1>多多朗读 · 软件图标挑选（第二批）</h1>
+<div class="sub">新一批 10 款方案（3D / 玻璃 / 金属 / 多彩渐变等不同质感）。点击卡片选择，挑好后告诉我编号即可。</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="bar">
+  <button class="btn primary" onclick="report()">生成我的选择</button>
+  <button class="btn ghost" onclick="clearSel()">清空</button>
+  <span id="picked"></span>
+</div>
+
+<script>
+const ICONS = [
+  { name:"玻璃·青蓝 3D", desc:"半透明玻璃质感 DD，青蓝渐变，现代高级", file:"icon2_1.png" },
+  { name:"播放·翠绿", desc:"青绿渐变 + 白色 DD + 播放箭头，清新（视频/音频感）", file:"icon2_2.png" },
+  { name:"声波·紫罗兰", desc:"紫色渐变 + 立体白色 DD + 粉紫声波，科技炫酷", file:"icon2_3.png" },
+  { name:"立体·珊瑚红", desc:"红色立体图标 + 粉/橙渐变双 D，活泼可爱 3D", file:"icon2_4.png" },
+  { name:"线条·极简", desc:"白底黑色轮廓 DD + 橙色小圆点，干净留白", file:"icon2_5.png" },
+  { name:"夜空·月书", desc:"深蓝夜空 + 金月星 + 发光书本 DD，夜间阅读静谧", file:"icon2_6.png" },
+  { name:"金属银", desc:"拉丝银金属质感 DD，深灰底，工业高级感", file:"icon2_7.png" },
+  { name:"奶油粉·声波", desc:"浅粉渐变 + 深棕 DD + 米色声波，温柔治愈", file:"icon2_8.png" },
+  { name:"绿松石·耳机", desc:"青绿渐变 + 白色 DD + 耳机线条，清新音频", file:"icon2_9.png" },
+  { name:"黑白·彩虹", desc:"纯白底黑色 DD + 彩虹渐变竖条，鲜明极简", file:"icon2_10.png" },
+  { name:"反色·黑底彩虹", desc:"方案10反色：纯黑底白色 DD + 彩虹竖条，对比强烈", file:"icon2_11.png" },
+  { name:"圆角·AI版", desc:"方案11圆角化：AI 生成的圆润 DD，自然柔滑", file:"icon2_11r.png" },
+  { name:"圆角·程序版", desc:"方案11圆角化：程序精确绘制的标准圆角 DD，几何规整", file:"icon2_11p.png" },
+  { name:"参考图·双D", desc:"仿参考图风格：黑色圆角方块 + 白色 DD + 下方多多朗读字样", file:"icon3_1.png" },
+  { name:"精确·深灰方块双D", desc:"程序精确绘制：透明底 + 深灰(#202020)圆角方块 + 白色 DD，圆角平滑抗锯齿", file:"icon3_2.png" },
+  { name:"原字体·空心描边DD", desc:"还原参考图原样式：深灰(#202020)圆角方块填满 + 浅灰空心描边双D，原字体不改变", file:"icon3_3.png" },
+  { name:"方案14·填满版", desc:"纯#202020深灰圆角背景铺满 + 原字体浅灰空心DD（不拉伸，修正溢出与噪点）", file:"icon4_4.png" },
+  { name:"OpenRunde·白色DD", desc:"#202020圆角背景 + OpenRunde字体白色实心双D，干净无杂色", file:"icon5_1.png" },
+];
+
+const sel = new Set();
+function render() {
+  document.getElementById("grid").innerHTML = ICONS.map((c, i) => `
+    <div class="card ${sel.has(i)?'sel':''}" onclick="toggle(${i})">
+      <div class="idx">方案 ${i+1}</div>
+      <div class="thumb"><img src="_icon_candidates/${c.file}" alt="${c.name}"></div>
+      <div class="name">${c.name}</div>
+      <div class="desc">${c.desc}</div>
+    </div>`).join("");
+}
+function toggle(i) { if (sel.has(i)) sel.delete(i); else sel.add(i); render(); updatePicked(); }
+function clearSel() { sel.clear(); render(); updatePicked(); }
+function updatePicked() {
+  document.getElementById("picked").textContent = sel.size ? "已选：" + [...sel].map(i=>"方案"+(i+1)).join("、") : "";
+}
+function report() {
+  if (!sel.size) { alert("请先点击选择图标"); return; }
+  alert("你选择了：" + [...sel].map(i=>"方案"+(i+1)+" "+ICONS[i].name).join("\n") + "\n\n请把编号告诉我，我会转成 .ico。");
+}
+render();
+</script>
+</body>
+</html>

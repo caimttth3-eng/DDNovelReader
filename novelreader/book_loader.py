@@ -8,13 +8,6 @@ from html.parser import HTMLParser
 from .chapterizer import split_chapters, fallback_split
 
 try:
-    import pymupdf as fitz  # 新版包名
-except Exception:  # pragma: no cover
-    try:
-        import fitz
-    except Exception:
-        fitz = None
-try:
     import docx as _docx
 except Exception:  # pragma: no cover
     _docx = None
@@ -24,7 +17,7 @@ except Exception:  # pragma: no cover
     _mobi = None
 
 SUPPORTED_EXTS = {
-    ".txt", ".epub", ".mobi", ".azw3", ".pdf", ".docx", ".html", ".htm",
+    ".txt", ".epub", ".mobi", ".azw3", ".pdf", ".docx", ".html", ".htm", ".zip",
 }
 
 
@@ -305,16 +298,22 @@ def _parse_mobi(path):
 
 
 def _parse_pdf(path):
-    if fitz is None:
-        raise ValueError("未安装 PyMuPDF，无法解析 PDF")
-    doc = fitz.open(path)
+    """用 pypdfium2（PDFium，Chrome 同款引擎）解析 PDF 文本。
+
+    比 PyMuPDF 轻量约 10MB+，速度接近，Apache 协议更宽松。
+    """
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
     try:
-        pages = [page.get_text("text") for page in doc]
-        meta_title = (doc.metadata or {}).get("title") or ""
+        pages = []
+        for i in range(len(pdf)):
+            page = pdf[i]
+            textpage = page.get_textpage()
+            pages.append(textpage.get_text_range())
     finally:
-        doc.close()
+        pdf.close()
     text = "\n".join(pages)
-    title = meta_title or os.path.splitext(os.path.basename(path))[0]
+    title = os.path.splitext(os.path.basename(path))[0]
     return BookContent(title, "", "pdf", _make_chapters(text))
 
 
@@ -339,6 +338,52 @@ def _parse_html(path):
     text = _extract_html(raw)
     title = os.path.splitext(os.path.basename(path))[0]
     return BookContent(title, "", "html", _make_chapters(text))
+
+
+def _parse_zip(path):
+    """解析 zip 压缩包：自动查找其中的 txt / epub 小说文件。"""
+    import tempfile
+    import shutil
+
+    try:
+        zf = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        raise ValueError("zip 文件损坏或不是有效的压缩包")
+    except RuntimeError:
+        raise ValueError("加密的 zip 暂不支持，请先解压")
+
+    try:
+        names = zf.namelist()
+        txt_files = [n for n in names
+                     if n.lower().endswith(".txt") and not n.endswith("/")
+                     and "__MACOSX" not in n]
+        epub_files = [n for n in names
+                      if n.lower().endswith(".epub") and not n.endswith("/")
+                      and "__MACOSX" not in n]
+
+        if not txt_files and not epub_files:
+            raise ValueError("压缩包内未找到 txt 或 epub 小说文件")
+
+        if epub_files:
+            target = epub_files[0]
+            tmp = tempfile.mkdtemp(prefix="ddnovel_zip_")
+            try:
+                epub_path = os.path.join(tmp, os.path.basename(target))
+                with zf.open(target) as src, open(epub_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                book = _parse_epub(epub_path)
+                book.format = "zip"
+                return book
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        target = max(txt_files, key=lambda n: zf.getinfo(n).file_size)
+        raw = zf.read(target)
+        text = _decode(raw)
+        title = os.path.splitext(os.path.basename(path))[0]
+        return BookContent(title, "", "zip", _make_chapters(text))
+    finally:
+        zf.close()
 
 
 # ---------------- 辅助 ----------------
@@ -373,6 +418,7 @@ _PARSERS = {
     ".docx": _parse_docx,
     ".html": _parse_html,
     ".htm": _parse_html,
+    ".zip": _parse_zip,
 }
 
 

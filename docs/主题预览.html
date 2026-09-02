@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多多朗读 · 阅读主题挑选</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:#f0f1f3; color:#222; padding:24px; }
+  h1 { font-size:22px; margin-bottom:6px; }
+  .sub { color:#666; font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+  .card { border-radius:10px; padding:16px; cursor:pointer; transition:transform .15s, box-shadow .15s; border:2px solid transparent; }
+  .card:hover { transform:translateY(-3px); box-shadow:0 6px 18px rgba(0,0,0,.15); }
+  .card.sel { border-color:#2f7cf6; box-shadow:0 0 0 2px rgba(47,124,246,.35); }
+  .name { font-size:16px; font-weight:600; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; }
+  .tag { font-size:11px; font-weight:400; padding:2px 8px; border-radius:10px; opacity:.85; }
+  .sample { font-size:14px; line-height:1.9; }
+  .sample .hl { border-radius:3px; padding:0 2px; }
+  .sample .title { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .colors { margin-top:12px; font-size:12px; opacity:.8; display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { display:inline-flex; align-items:center; gap:5px; }
+  .dot { width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,.12); display:inline-block; }
+  .bar { margin-top:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .btn { padding:8px 18px; border:none; border-radius:8px; font-size:14px; cursor:pointer; }
+  .btn.primary { background:#2f7cf6; color:#fff; }
+  .btn.ghost { background:#e4e6ea; color:#333; }
+  #picked { font-size:13px; color:#555; }
+  .note { margin-top:14px; font-size:12px; color:#888; }
+</style>
+</head>
+<body>
+<h1>多多朗读 · 阅读主题挑选</h1>
+<div class="sub">点击卡片选择想要的主题（可多选），下方会汇总你的选择。挑好后告诉我主题名即可。</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="bar">
+  <button class="btn primary" onclick="report()">生成我的选择</button>
+  <button class="btn ghost" onclick="clearSel()">清空</button>
+  <span id="picked"></span>
+</div>
+<div class="note">高亮色 = 朗读时当前句的背景色。色值格式与软件现有主题一致（背景 / 文字 / 高亮）。</div>
+
+<script>
+const SAMPLE_TITLE = "夜风掠过街角";
+const SAMPLE_TEXT = "夜风掠过街角的梧桐树，卷起几片枯黄的叶。";
+const SAMPLE_HL = "他合上手中的书，抬头望向窗外的月亮，心里忽然安静下来。";
+const SAMPLE_TEXT2 = "明天还会是平凡的一天，但此刻的宁静，已足够让人满足。";
+
+const THEMES = [
+  // —— 按截图定制（浅米黄）——
+  { name:"米黄·截图款", tag:"定制", bg:"#DCD1B5", fg:"#000000", hl:"#E8C87A", group:"浅色" },
+  // —— 现有主题（已内置）——
+  { name:"白天", tag:"现有", bg:"#FFFFFF", fg:"#222222", hl:"#FFE28A", group:"现有" },
+  { name:"护眼", tag:"现有", bg:"#F6EFE3", fg:"#4A4A4A", hl:"#F3C76A", group:"现有" },
+  { name:"夜间", tag:"现有", bg:"#202124", fg:"#C9C9C9", hl:"#7A5C22", group:"现有" },
+  // —— 新增·浅色系 ——
+  { name:"羊皮纸", tag:"新增", bg:"#F5ECD9", fg:"#3D3325", hl:"#E8C87A", group:"浅色" },
+  { name:"护眼绿", tag:"新增", bg:"#DDE8D4", fg:"#2E3D2E", hl:"#BFD9A8", group:"浅色" },
+  { name:"豆沙粉", tag:"新增", bg:"#F7E8E4", fg:"#5A3A38", hl:"#EFC3B9", group:"浅色" },
+  { name:"雾蓝", tag:"新增", bg:"#E4EDF6", fg:"#2E3E52", hl:"#BCD6EC", group:"浅色" },
+  { name:"奶油", tag:"新增", bg:"#FBF6EC", fg:"#423A2D", hl:"#F2DFB8", group:"浅色" },
+  { name:"薄荷", tag:"新增", bg:"#E2F2EC", fg:"#20513F", hl:"#A9DDC9", group:"浅色" },
+  // —— 新增·深色系 ——
+  { name:"暗夜黑", tag:"新增", bg:"#000000", fg:"#B8B8B8", hl:"#8A6D3B", group:"深色" },
+  { name:"深灰蓝", tag:"新增", bg:"#1E2430", fg:"#A9B3C1", hl:"#5C7A99", group:"深色" },
+  { name:"墨绿夜", tag:"新增", bg:"#1C2B24", fg:"#A9BFB0", hl:"#4F7A5F", group:"深色" },
+  { name:"深棕褐", tag:"新增", bg:"#2B2118", fg:"#C9B8A5", hl:"#8A6A45", group:"深色" },
+  { name:"紫罗兰", tag:"新增", bg:"#241F30", fg:"#B3A8C9", hl:"#6B5B8E", group:"深色" },
+  { name:"铁灰", tag:"新增", bg:"#1F1F1F", fg:"#C0C0C0", hl:"#8A8A4A", group:"深色" },
+];
+
+const sel = new Set();
+
+function render() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = THEMES.map((t, i) => {
+    const cls = sel.has(t.name) ? "card sel" : "card";
+    return `
+    <div class="${cls}" onclick="toggle(${i})" style="background:${t.bg};color:${t.fg}">
+      <div class="name">${t.name}
+        <span class="tag" style="background:${t.group==='深色'?'rgba(255,255,255,.14)':'rgba(0,0,0,.07)'};color:${t.group==='深色'?'#ddd':'#666'}">${t.tag}·${t.group}</span>
+      </div>
+      <div class="sample">
+        <div class="title" style="color:${t.fg}">${SAMPLE_TITLE}</div>
+        <span>${SAMPLE_TEXT}</span><br>
+        <span class="hl" style="background:${t.hl};color:${t.fg}">${SAMPLE_HL}</span><br>
+        <span>${SAMPLE_TEXT2}</span>
+      </div>
+      <div class="colors">
+        <span class="chip"><span class="dot" style="background:${t.bg}"></span>${t.bg}</span>
+        <span class="chip"><span class="dot" style="background:${t.fg}"></span>${t.fg}</span>
+        <span class="chip"><span class="dot" style="background:${t.hl}"></span>${t.hl}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggle(i) {
+  const t = THEMES[i].name;
+  if (sel.has(t)) sel.delete(t); else sel.add(t);
+  render(); updatePicked();
+}
+
+function clearSel() { sel.clear(); render(); updatePicked(); }
+function updatePicked() {
+  document.getElementById("picked").textContent = sel.size ? "已选：" + [...sel].join("、") : "";
+}
+function report() {
+  if (!sel.size) { alert("请先点击选择主题"); return; }
+  const picked = THEMES.filter(t => sel.has(t.name));
+  const rows = picked.map(t => `  "${t.name}": {"bg": "${t.bg}", "fg": "${t.fg}", "hl": "${t.hl}"},`).join("\n");
+  const msg = "你选择了 " + picked.map(t=>t.name).join("、") + "。\n\n配置代码：\n" + rows;
+  alert(msg);
+}
+
+render();
+</script>
+</body>
+</html>

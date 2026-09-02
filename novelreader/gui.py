@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """多多朗读（DDNovelReader）主界面：书架 / 阅读区 / 字体调节 / 总进度 / TTS 朗读。"""
 import ctypes
 import os
@@ -28,12 +28,60 @@ THEMES = {
     "白天": {"bg": "#FFFFFF", "fg": "#222222", "hl": "#FFE28A"},
     "护眼": {"bg": "#F6EFE3", "fg": "#4A4A4A", "hl": "#F3C76A"},
     "夜间": {"bg": "#202124", "fg": "#C9C9C9", "hl": "#7A5C22"},
+    "米黄": {"bg": "#DCD1B5", "fg": "#000000", "hl": "#E8C87A"},
+}
+
+# 控件主题（全控件UI风格，A-F六套）
+UI_THEMES = {
+    "A·米黄暖读": {
+        "bg": "#FAF3E0", "btn": "#F5E6C8", "hover": "#EDD9A8", "pressed": "#E5CC8A",
+        "fg": "#5C4A1F", "muted": "#8B7355", "accent": "#B8860B",
+        "border": "#D4C4A0", "trough": "#E8DCC0", "field": "#FFFBF0",
+        "selected": "#EDD9A8", "tab_bg": "#EDE0C4", "tab_active": "#FAF3E0",
+        "slider": "#B8860B", "slider_active": "#9A6F0A",
+    },
+    "B·深色夜间": {
+        "bg": "#2D2D30", "btn": "#3E3E42", "hover": "#4E4E52", "pressed": "#5A5A5E",
+        "fg": "#E0E0E0", "muted": "#A0A0A0", "accent": "#007ACC",
+        "border": "#4A4A4E", "trough": "#3A3A3D", "field": "#3E3E42",
+        "selected": "#094771", "tab_bg": "#252526", "tab_active": "#2D2D30",
+        "slider": "#007ACC", "slider_active": "#1A8AD5",
+    },
+    "C·清爽浅蓝": {
+        "bg": "#F0F8FF", "btn": "#E8F4FD", "hover": "#D0E8F7", "pressed": "#B8DDF0",
+        "fg": "#1A5276", "muted": "#5D8AA8", "accent": "#2980B9",
+        "border": "#B8D4E8", "trough": "#D0E8F7", "field": "#FFFFFF",
+        "selected": "#D0E8F7", "tab_bg": "#DCEEF8", "tab_active": "#F0F8FF",
+        "slider": "#2980B9", "slider_active": "#1A6FA0",
+    },
+    "D·原生微调": {
+        "bg": "#F5F6F8", "btn": "#F0F0F0", "hover": "#E5F1FB", "pressed": "#DCEBF7",
+        "fg": "#1E1E1E", "muted": "#666666", "accent": "#4A90D9",
+        "border": "#D0D0D0", "trough": "#E0E0E0", "field": "#FFFFFF",
+        "selected": "#E5F1FB", "tab_bg": "#E8E8E8", "tab_active": "#FFFFFF",
+        "slider": "#888888", "slider_active": "#666666",
+    },
+    "E·青绿科技": {
+        "bg": "#F0FAF9", "btn": "#E0F2F1", "hover": "#B2DFDB", "pressed": "#80CBC4",
+        "fg": "#004D40", "muted": "#4DB6AC", "accent": "#009688",
+        "border": "#B2DFDB", "trough": "#C8E6C9", "field": "#FFFFFF",
+        "selected": "#B2DFDB", "tab_bg": "#C8E6C9", "tab_active": "#F0FAF9",
+        "slider": "#009688", "slider_active": "#00796B",
+    },
+    "F·豆沙暖粉": {
+        "bg": "#FFF5F8", "btn": "#FCE4EC", "hover": "#F8BBD0", "pressed": "#F48FB1",
+        "fg": "#880E4F", "muted": "#C2185B", "accent": "#E91E63",
+        "border": "#F8BBD0", "trough": "#FCE4EC", "field": "#FFFFFF",
+        "selected": "#F8BBD0", "tab_bg": "#F8BBD0", "tab_active": "#FFF5F8",
+        "slider": "#E91E63", "slider_active": "#C2185B",
+    },
 }
 
 FILE_TYPES = [
-    ("支持的小说格式", "*.txt *.epub *.mobi *.azw3 *.pdf *.docx *.html *.htm"),
+    ("支持的小说格式", "*.txt *.epub *.mobi *.azw3 *.pdf *.docx *.html *.htm *.zip"),
     ("文本文件", "*.txt"),
     ("电子书", "*.epub *.mobi *.azw3"),
+    ("压缩包", "*.zip"),
     ("PDF 文档", "*.pdf"),
     ("Word 文档", "*.docx"),
     ("网页文件", "*.html *.htm"),
@@ -116,6 +164,8 @@ class NovelReaderApp:
         self.book = None          # BookContent
         self.chapter_idx = 0
         self.char_offset = 0
+        self._title_char_len = 0       # 章节标题+换行的字符数，用于位置换算
+        self._body_start_line = 1      # 正文在显示文本中的起始行号
         self.settings = dict(self.storage.settings())
         self._save_timer = None
         self._cache = {}
@@ -145,8 +195,12 @@ class NovelReaderApp:
 
     # ================= UI 构建 =================
     def _icon_path(self):
-        """解析程序图标路径（源码运行 / exe 打包两种模式）。"""
+        """解析程序图标路径（优先用户自定义皮肤图标，其次默认 app.ico）。"""
         try:
+            # 用户自定义图标（exe 模式下可写）
+            custom = os.path.join(os.environ.get("APPDATA", ""), "DDNovelReader", "custom.ico")
+            if os.path.exists(custom):
+                return custom
             if getattr(sys, "frozen", False):
                 base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
             else:
@@ -155,6 +209,27 @@ class NovelReaderApp:
             return p if os.path.exists(p) else None
         except Exception:
             return None
+
+    def _skins_dir(self):
+        """皮肤图标目录（源码 / exe 打包两种模式）。"""
+        try:
+            if getattr(sys, "frozen", False):
+                base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            else:
+                base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            d = os.path.join(base, "assets", "skins")
+            return d if os.path.isdir(d) else None
+        except Exception:
+            return None
+
+    def _current_skin_png(self):
+        """当前图标对应的 PNG 路径（用于关于界面显示）。"""
+        d = self._skins_dir()
+        if d:
+            p = os.path.join(d, "icon5_1.png")
+            if os.path.exists(p):
+                return p
+        return None
 
     def _default_geometry(self):
         """按当前 DPI 缩放默认窗口尺寸，兼容 Windows 百分比缩放（125%/150%…）。"""
@@ -262,6 +337,158 @@ class NovelReaderApp:
         except Exception:
             pass
 
+    def _apply_ui_theme(self, name):
+        """应用控件主题（A-F六套），统一全控件风格。name 为 UI_THEMES 的键。"""
+        c = UI_THEMES.get(name, UI_THEMES["D·原生微调"])
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        df = ("微软雅黑", 9)
+
+        # TButton
+        style.configure("TButton", font=df, padding=(8, 5),
+                        background=c["btn"], foreground=c["fg"],
+                        bordercolor=c["border"], relief="flat", borderwidth=1)
+        style.map("TButton",
+                  background=[("active", c["hover"]), ("pressed", c["pressed"])],
+                  bordercolor=[("active", c["accent"])],
+                  foreground=[("disabled", c["muted"])])
+
+        # TCombobox
+        style.configure("TCombobox", font=df, fieldbackground=c["field"],
+                        background=c["btn"], arrowcolor=c["fg"],
+                        bordercolor=c["border"], padding=(4, 3))
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", c["field"]), ("focus", c["field"])],
+                  background=[("active", c["hover"])])
+
+        # TProgressbar
+        style.configure("TProgressbar", troughcolor=c["trough"], background=c["accent"],
+                        bordercolor=c["border"], lightcolor=c["accent"], darkcolor=c["accent"],
+                        thickness=14)
+
+        # Treeview
+        style.configure("Treeview", font=df, rowheight=26,
+                        background=c["field"], foreground=c["fg"],
+                        fieldbackground=c["field"], bordercolor=c["border"])
+        style.configure("Treeview.Heading", font=("微软雅黑", 9, "bold"),
+                        background=c["btn"], foreground=c["fg"],
+                        bordercolor=c["border"], padding=(4, 4))
+        style.map("Treeview",
+                  background=[("selected", c["selected"])],
+                  foreground=[("selected", c["fg"])])
+        style.map("Treeview.Heading",
+                  background=[("active", c["hover"])])
+
+        # TNotebook
+        style.configure("TNotebook", background=c["bg"], bordercolor=c["border"])
+        style.configure("TNotebook.Tab", font=df, padding=(12, 5),
+                        background=c["tab_bg"], foreground=c["fg"])
+        style.map("TNotebook.Tab",
+                  background=[("selected", c["tab_active"]), ("active", c["hover"])],
+                  foreground=[("selected", c["fg"])])
+
+        # TPanedwindow
+        style.configure("TPanedwindow", background=c["border"], sashwidth=4, sashrelief="flat")
+
+        # TSeparator
+        style.configure("TSeparator", background=c["border"])
+
+        # TScale（阅读进度滑块）
+        style.configure("Seek.Horizontal.TScale", troughcolor=c["trough"],
+                        background=c["slider"], bordercolor=c["border"],
+                        lightcolor=c["slider"], darkcolor=c["slider_active"])
+        style.map("Seek.Horizontal.TScale",
+                  background=[("active", c["slider_active"])])
+        style.configure("TScale", troughcolor=c["trough"], background=c["slider"])
+
+        # TLabel/TFrame/TEntry
+        style.configure("TLabel", font=df, foreground=c["fg"])
+        style.configure("TFrame", background=c["bg"])
+        style.configure("TEntry", font=df, fieldbackground=c["field"],
+                        bordercolor=c["border"], padding=(4, 3))
+
+        # TCheckbutton/TRadiobutton
+        style.configure("TCheckbutton", font=df, background=c["field"], foreground=c["fg"])
+        style.map("TCheckbutton", background=[("active", c["hover"])])
+        style.configure("TRadiobutton", font=df, background=c["field"], foreground=c["fg"])
+
+        # tk 原生控件
+        self.root.option_add("*Menu.Font", df)
+        self.root.option_add("*Menu.activeBackground", c["hover"])
+        self.root.option_add("*Menu.activeForeground", c["fg"])
+        self.root.option_add("*Menu.background", c["field"])
+        self.root.option_add("*Menu.foreground", c["fg"])
+        self.root.option_add("*Menu.relief", "flat")
+        self.root.option_add("*Listbox.font", df)
+        self.root.option_add("*Listbox.selectBackground", c["selected"])
+        self.root.option_add("*Listbox.selectForeground", c["fg"])
+        self.root.option_add("*Listbox.background", c["field"])
+        self.root.option_add("*Listbox.foreground", c["fg"])
+        self.root.option_add("*Listbox.selectForeground", c["fg"])
+        self.root.option_add("*Button.foreground", c["fg"])
+        self.root.option_add("*Checkbutton.font", df)
+        self.root.option_add("*Checkbutton.activeBackground", c["hover"])
+        self.root.option_add("*Checkbutton.background", c["field"])
+        self.root.option_add("*Scrollbar.troughColor", c["trough"])
+        self.root.option_add("*Scrollbar.background", c["btn"])
+        self.root.option_add("*Scrollbar.activeBackground", c["hover"])
+        # 全局默认背景（对之后创建的弹窗生效）
+        self.root.option_add("*Frame.background", c["bg"])
+        self.root.option_add("*Label.background", c["bg"])
+        self.root.option_add("*Button.background", c["bg"])
+        self.root.option_add("*Toplevel.background", c["bg"])
+
+        # 主窗口背景
+        try:
+            self.root.configure(bg=c["bg"])
+        except Exception:
+            pass
+
+        # 递归设置所有已创建的 tk 容器背景（Frame/Label/Button/Toplevel）
+        _exclude = set()
+        for _attr in ("_overlay",):
+            _w = getattr(self, _attr, None)
+            if _w is not None:
+                try:
+                    _exclude.add(str(_w))
+                except Exception:
+                    pass
+
+        def _set_bg(w, color):
+            try:
+                if str(w) in _exclude:
+                    return  # 跳过全屏 overlay 及其子控件
+                wt = w.winfo_class()
+                if wt in ("Frame", "Label", "Button", "Toplevel"):
+                    w.configure(bg=color)
+                if wt == "Button":
+                    # tk.Button（非 ttk）文字色跟随主题
+                    try:
+                        w.configure(fg=c["fg"])
+                    except Exception:
+                        pass
+                if wt == "Listbox":
+                    # 目录列表：背景+文字色+选中色
+                    try:
+                        w.configure(bg=c["field"], fg=c["fg"],
+                                    selectbackground=c["selected"], selectforeground=c["fg"])
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            for ch in w.winfo_children():
+                _set_bg(ch, color)
+        try:
+            _set_bg(self.root, c["bg"])
+        except Exception:
+            pass
+
+        self.settings["ui_theme"] = name
+        self.storage.set_setting("ui_theme", name)
+
     def _center_window(self, win):
         """把弹窗移动到屏幕正中间（不改变窗口大小）。"""
         try:
@@ -289,16 +516,26 @@ class NovelReaderApp:
                 self.root.iconbitmap(icon)
             except Exception:
                 pass
+        self._apply_ui_theme(self.settings.get("ui_theme", "A·米黄暖读"))
 
-        # ---- 外层 PanedWindow：书架 | 主体（可拖拽调节宽度） ----
-        outer = ttk.Panedwindow(self.root, orient="horizontal")
-        outer.pack(fill="both", expand=True, padx=6, pady=6)
-        self._outer_paned = outer
+        # ---- 主体直接占满（书架下移到内层 PanedWindow，与目录/阅读区同层，避免挤占工具条） ----
+        main = tk.Frame(self.root)
+        main.pack(fill="both", expand=True, padx=6, pady=6)
+        # 用 grid 布局：工具条(0,0) / 阅读+书架+目录(1,0) / 状态栏(2,0)
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_rowconfigure(1, weight=1)
+        self._main = main
+
+        # 工具条
+        self._build_toolbar(main)
+
+        # 阅读区 + 书架 + 目录 用内层 PanedWindow（可拖拽调节宽度）
+        self._inner_paned = ttk.Panedwindow(main, orient="horizontal")
+        self._inner_paned.grid(row=1, column=0, sticky="nsew", pady=(6, 2))
 
         # 左侧：书架
-        left = tk.Frame(outer, width=280)
+        left = tk.Frame(self._inner_paned, width=280)
         self._left = left
-        outer.add(left, weight=0)
 
         shelf_header = tk.Button(left, text="📚 我的书架", font=("微软雅黑", 11, "bold"),
                                   relief="flat", cursor="hand2", anchor="w",
@@ -325,6 +562,8 @@ class NovelReaderApp:
         self.shelf_tree.bind("<Double-Button-1>", lambda e: self._open_selected())
         self.shelf_tree.bind("<Return>", lambda e: self._open_selected())
         self.shelf_tree.bind("<Button-3>", self._popup_shelf_menu)
+        # 拖拽导入：拖文件到书架区或主窗口任意位置即可导入
+        self._setup_drag_drop()
         self._shelf_sort_col = "time"
         self._shelf_sort_rev = True
 
@@ -343,21 +582,7 @@ class NovelReaderApp:
         btn_row = tk.Frame(left)
         btn_row.pack(fill="x")
         ttk.Button(btn_row, text="＋ 添加书籍", command=self._add_book).pack(fill="x", pady=2)
-
-        # ---- 右侧主体 ----
-        main = tk.Frame(outer)
-        outer.add(main, weight=1)
-        # 用 grid 布局：工具条(0,0) / 阅读+目录(1,0) / 状态栏(2,0)
-        main.grid_columnconfigure(0, weight=1)
-        main.grid_rowconfigure(1, weight=1)
-        self._main = main
-
-        # 工具条
-        self._build_toolbar(main)
-
-        # 阅读区 + 目录 用内层 PanedWindow（可拖拽调节宽度）
-        self._inner_paned = ttk.Panedwindow(main, orient="horizontal")
-        self._inner_paned.grid(row=1, column=0, sticky="nsew", pady=(6, 2))
+        self._shelf_visible = False
 
         read_frame = tk.Frame(self._inner_paned)
         self._inner_paned.add(read_frame, weight=1)
@@ -522,7 +747,7 @@ class NovelReaderApp:
         self.paragraph_cb.pack(side="left", padx=(2, 8))
         self.paragraph_cb.bind("<<ComboboxSelected>>", self._on_paragraph_mode)
 
-        _lbl(row2, "主题")
+        _lbl(row2, "书页")
         self.theme_cb = ttk.Combobox(row2, state="readonly", values=list(THEMES.keys()), width=5)
         self.theme_cb.pack(side="left", padx=(2, 0))
         self.theme_cb.bind("<<ComboboxSelected>>", self._on_theme_change)
@@ -553,18 +778,29 @@ class NovelReaderApp:
         self.gap_label.pack(side="left")
         ttk.Button(row3, text="＋", width=2, command=lambda: self._change_sentence_gap(0.05)).pack(side="left", padx=(1, 8))
 
-        _lbl(row3, "语音")
-        self.voice_cb = ttk.Combobox(row3, state="readonly", width=24)
+        # ---- 第 4 行：音量/语音/缓存/定时 ----
+        row4 = tk.Frame(bar)
+        row4.pack(fill="x", pady=(0, 3))
+        _lbl(row4, "音量")
+        self.volume_var = tk.DoubleVar(value=100)
+        self.volume_scale = ttk.Scale(row4, from_=0, to=100, variable=self.volume_var,
+                                       command=self._on_volume_change, length=110)
+        self.volume_scale.pack(side="left", padx=(2, 4))
+        self.volume_label = tk.Label(row4, text="100", width=4, font=("微软雅黑", 10))
+        self.volume_label.pack(side="left", padx=(0, 8))
+
+        _lbl(row4, "语音")
+        self.voice_cb = ttk.Combobox(row4, state="readonly", width=24)
         self.voice_cb.pack(side="left", padx=(2, 0))
         self.voice_cb.bind("<<ComboboxSelected>>", self._on_voice_change)
         self.voice_cb["values"] = self._friendly_voices()
 
         # 整本语音缓存（Edge 神经语音）
-        self.tts_cache_btn = ttk.Button(row3, text="整本缓存", width=8, command=self._open_cache_dialog)
+        self.tts_cache_btn = ttk.Button(row4, text="整本缓存", width=8, command=self._open_cache_dialog)
         self.tts_cache_btn.pack(side="left", padx=(10, 0))
 
         # 定时停止朗读（分钟）
-        self.timer_btn = ttk.Button(row3, text="定时", width=8, command=self._open_timer_dialog)
+        self.timer_btn = ttk.Button(row4, text="定时", width=8, command=self._open_timer_dialog)
         self.timer_btn.pack(side="left", padx=(4, 0))
 
         # 工具条与阅读区之间的分隔线
@@ -588,6 +824,10 @@ class NovelReaderApp:
         self.tts.set_rate(self.settings.get("tts_rate", 200))
         self.tts.set_sentence_gap(self.settings.get("tts_sentence_gap", 0.10))
         self.gap_label.configure(text=f"{float(self.settings.get('tts_sentence_gap', 0.10)):.2f}")
+        _vol = int(self.settings.get("volume", 100))
+        self.volume_var.set(_vol)
+        self.volume_label.configure(text=str(_vol))
+        self.tts.set_volume(_vol)
         pm = int(self.settings.get("paragraph_mode", 1))
         if 1 <= pm <= 3:
             self.paragraph_cb.current(pm - 1)
@@ -679,6 +919,16 @@ class NovelReaderApp:
             lmargin1=indent,
             lmargin2=0,
         )
+        # 章节标题样式：比正文大4号、加粗、居中、段后间距大
+        self.text.tag_configure(
+            "chapter_title",
+            font=(fam, size + 4, "bold"),
+            justify="center",
+            spacing1=round(size * 0.5),
+            spacing3=round(size * 1.2),
+            lmargin1=0,
+            lmargin2=0,
+        )
         self._tag_body()
         self._repin_reading()
 
@@ -694,7 +944,10 @@ class NovelReaderApp:
 
     def _tag_body(self):
         try:
-            self.text.tag_add("body", "1.0", "end")
+            # 只给正文部分加 body 标签，标题保留 chapter_title 样式
+            body_start = f"{self._body_start_line}.0"
+            self.text.tag_remove("body", "1.0", "end")
+            self.text.tag_add("body", body_start, "end")
         except Exception:
             pass
 
@@ -907,6 +1160,56 @@ class NovelReaderApp:
         if bid:
             self.open_book(bid)
 
+    def _setup_drag_drop(self):
+        """绑定文件拖拽（tkinterdnd2 原生方案，事件在主线程，稳定不闪退）。
+
+        只绑定主窗口，整个窗口区域都能拖入文件。
+        若 tkinterdnd2 不可用（降级为普通 Tk），则拖拽功能不可用，不影响其他功能。
+        """
+        try:
+            if not hasattr(self.root, 'drop_target_register'):
+                return  # 普通 Tk，不支持拖拽
+            from tkinterdnd2 import DND_FILES
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind('<<Drop>>', self._on_drop_files)
+        except Exception:
+            pass  # 拖拽不可用时静默降级
+
+    def _on_drop_files(self, event):
+        """拖拽释放回调（tkinterdnd2 在主线程调用）。"""
+        try:
+            # event.data 是空格分隔的文件路径字符串，含空格的路径用 {} 包裹
+            paths = list(self.root.tk.splitlist(event.data))
+            self._handle_dropped_files(paths)
+        except Exception as e:
+            try:
+                if self.root.winfo_exists():
+                    messagebox.showerror("拖拽导入失败", str(e))
+            except Exception:
+                pass
+
+    def _handle_dropped_files(self, paths):
+        """处理拖拽进来的文件列表（在主线程调用）。任何异常都不闪退。"""
+        try:
+            if not self.root.winfo_exists():
+                return
+            paths = [p for p in paths if p and os.path.isfile(p)]
+            if not paths:
+                return
+            try:
+                paths = self._filter_large_files(paths)
+            except Exception:
+                return
+            if not paths:
+                return
+            self._import_many(paths)
+        except Exception as e:
+            try:
+                if self.root.winfo_exists():
+                    messagebox.showerror("拖拽导入失败", str(e))
+            except Exception:
+                pass
+
     def _add_book(self):
         paths = filedialog.askopenfilenames(title="选择要加入书架的小说（可多选）", filetypes=FILE_TYPES)
         if not paths:
@@ -914,8 +1217,54 @@ class NovelReaderApp:
         paths = [p for p in paths if p]
         if not paths:
             return
+        # 大文件确认：超过 25MB 弹确认，防止误选
+        paths = self._filter_large_files(paths)
+        if not paths:
+            return
         # v1.93：单本 / 多本统一走后台线程 + 进度条窗口，解析分章不卡 UI
         self._import_many(paths)
+
+    def _filter_large_files(self, paths, threshold_mb=25):
+        """检查文件大小，超过阈值的弹确认窗口询问是否选中正确文件。返回确认后的路径列表。"""
+        large = []
+        for p in paths:
+            try:
+                size_mb = os.path.getsize(p) / (1024 * 1024)
+                if size_mb > threshold_mb:
+                    large.append((p, size_mb))
+            except OSError:
+                continue
+        if not large:
+            return paths
+        # 弹确认窗口
+        dlg = tk.Toplevel(self.root)
+        dlg.title("文件较大")
+        dlg.geometry("480x220")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        self._center_window(dlg)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        names = "\n".join(f"  · {os.path.basename(p)} ({sz:.1f}MB)" for p, sz in large)
+        tk.Label(dlg, text=f"以下 {len(large)} 个文件超过 {threshold_mb}MB：",
+                 font=("微软雅黑", 10, "bold")).pack(pady=(14, 6), anchor="w", padx=16)
+        tk.Label(dlg, text=names, fg="#444444", font=("微软雅黑", 9),
+                 justify="left", anchor="w").pack(padx=20, anchor="w")
+        tk.Label(dlg, text="确认选中的是小说文件？",
+                 fg="#666666", font=("微软雅黑", 9)).pack(pady=(8, 4))
+        result = [None]
+        ops = tk.Frame(dlg)
+        ops.pack(pady=6)
+        tk.Button(ops, text="确认导入", width=10,
+                  command=lambda: (result.__setitem__(0, True), dlg.destroy())).pack(side="left", padx=6)
+        tk.Button(ops, text="取消", width=8,
+                  command=dlg.destroy).pack(side="left", padx=6)
+        self.root.wait_window(dlg)
+        if result[0]:
+            return paths
+        return []
 
     def _import_single(self, path):
         bid = self.storage.book_id(path)
@@ -1233,7 +1582,16 @@ class NovelReaderApp:
         ch = self.book.chapters[self.chapter_idx]
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
-        self.text.insert("1.0", self._apply_paragraph_mode(ch.content))
+        # 插入章节标题（用户翻章时能明显看到当前章节）
+        title_text = ch.title.strip() if ch.title else f"第 {self.chapter_idx + 1} 章"
+        self.text.insert("1.0", title_text + "\n\n", "chapter_title")
+        # 记录标题偏移量（标题+两个换行）
+        self._title_char_len = len(title_text) + 2
+        # 正文起始行号：注意 Tk 的 index("end") 在文本以 \n\n 结尾时会多返回 1 行
+        # （隐含末尾空行），而正文实际插入后落在 end-1c 所在行，故用 end-1c。
+        self._body_start_line = int(self.text.index("end-1c").split(".")[0])
+        # 插入正文
+        self.text.insert("end", self._apply_paragraph_mode(ch.content), "body")
         self.text.configure(state="disabled")
         self._apply_font()
         self._tag_body()
@@ -1318,7 +1676,9 @@ class NovelReaderApp:
         try:
             top = self.text.index("@0,0")
             cnt = self.text.count("1.0", top, "chars")
-            return cnt[0] if cnt else 0
+            raw = cnt[0] if cnt else 0
+            # 减去章节标题的字符数，得到正文中的偏移
+            return max(0, raw - self._title_char_len)
         except Exception:
             return 0
 
@@ -1331,6 +1691,8 @@ class NovelReaderApp:
         content = self.book.chapters[self.chapter_idx].content
         mode = int(self.settings.get("paragraph_mode", 1))
         line = max(1, int(line))
+        # 减去章节标题占的行数，得到正文中的行号
+        line = max(1, line - self._body_start_line + 1)
         if mode == 3:
             return 0
         if mode == 2:
@@ -1485,6 +1847,13 @@ class NovelReaderApp:
         self.tts.set_sentence_gap(gap)
         self.storage.set_setting("tts_sentence_gap", gap)
 
+    def _on_volume_change(self, val):
+        v = int(float(val))
+        self.volume_label.configure(text=str(v))
+        self.tts.set_volume(v)
+        self.settings["volume"] = v
+        self.storage.set_setting("volume", v)
+
     def _on_theme_change(self, event):
         theme = self.theme_cb.get()
         self.settings["theme"] = theme
@@ -1497,28 +1866,47 @@ class NovelReaderApp:
 
         top = tk.Toplevel(self.root)
         top.title(f"关于 {version_info.APP_NAME}")
-        top.geometry("640x720")
-        top.minsize(520, 560)
+        top.geometry("700x800")
+        top.minsize(560, 620)
         top.transient(self.root)
         self._center_window(top)
-        top.configure(bg="#ffffff")
+        _about_bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_about_bg)
 
-        head = tk.Frame(top, bg="#ffffff")
+        head = tk.Frame(top, bg=_about_bg)
         head.pack(fill="x", padx=18, pady=(16, 6))
-        tk.Label(head, text=f"{version_info.APP_NAME}  v{__version__}",
-                 font=("微软雅黑", 17, "bold"), bg="#ffffff").pack(anchor="w")
-        tk.Label(head, text=f"Windows 桌面有声小说阅读器（多多朗读）  ·  当前版本 v{__version__}",
-                 fg="#777777", bg="#ffffff", font=("微软雅黑", 10)).pack(anchor="w", pady=(2, 0))
-        email_row = tk.Frame(head, bg="#ffffff")
+        # 左侧：当前图标（彩蛋：点击进入主题选择）
+        icon_col = tk.Frame(head, bg=_about_bg)
+        icon_col.pack(side="left", padx=(0, 14))
+        try:
+            png = self._current_skin_png()
+            if png:
+                self._about_icon_img = tk.PhotoImage(file=png)
+                self._about_icon_img = self._about_icon_img.subsample(4, 4)
+                icon_lbl = tk.Label(icon_col, image=self._about_icon_img, bg=_about_bg, cursor="hand2")
+                icon_lbl.pack()
+                icon_lbl.bind("<Button-1>", lambda e: self._open_skin_picker())
+                tk.Label(icon_col, text="点击换主题", fg="#999999", bg=_about_bg,
+                         font=("微软雅黑", 8)).pack(pady=(2, 0))
+        except Exception:
+            pass
+        # 右侧：文字信息
+        info = tk.Frame(head, bg=_about_bg)
+        info.pack(side="left", fill="x", expand=True)
+        tk.Label(info, text=f"{version_info.APP_NAME}  v{__version__}",
+                 font=("微软雅黑", 17, "bold"), bg=_about_bg).pack(anchor="w")
+        tk.Label(info, text=f"Windows 桌面有声小说阅读器（多多朗读）  ·  当前版本 v{__version__}",
+                 fg="#777777", bg=_about_bg, font=("微软雅黑", 10)).pack(anchor="w", pady=(2, 0))
+        email_row = tk.Frame(info, bg=_about_bg)
         email_row.pack(anchor="w", pady=(6, 0))
-        tk.Label(email_row, text="作者联系方式：", fg="#555555", bg="#ffffff",
+        tk.Label(email_row, text="作者联系方式：", fg="#555555", bg=_about_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         self._email_label = tk.Label(
-            email_row, text="230468896@qq.com", fg="#2b6cb0", bg="#ffffff",
+            email_row, text="230468896@qq.com", fg="#2b6cb0", bg=_about_bg,
             font=("微软雅黑", 10, "underline"), cursor="hand2")
         self._email_label.pack(side="left")
         self._email_label.bind("<Button-1>", lambda e: self._copy_email())
-        tk.Label(email_row, text="（点击复制）", fg="#999999", bg="#ffffff",
+        tk.Label(email_row, text="（点击复制）", fg="#999999", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
 
         nb = ttk.Notebook(top)
@@ -1549,10 +1937,10 @@ class NovelReaderApp:
         keys.configure(state="disabled")
 
         # —— 缓存管理（可滚动卡片式布局） ——
-        tab_cache.configure(bg="#f5f6f8")
-        cache_canvas = tk.Canvas(tab_cache, bg="#f5f6f8", highlightthickness=0, bd=0)
+        tab_cache.configure(bg=_about_bg)
+        cache_canvas = tk.Canvas(tab_cache, bg=_about_bg, highlightthickness=0, bd=0)
         cache_scroll = ttk.Scrollbar(tab_cache, orient="vertical", command=cache_canvas.yview)
-        cache_inner = tk.Frame(cache_canvas, bg="#f5f6f8")
+        cache_inner = tk.Frame(cache_canvas, bg=_about_bg)
         cache_inner.bind("<Configure>", lambda e: cache_canvas.configure(scrollregion=cache_canvas.bbox("all")))
         cache_canvas.create_window((0, 0), window=cache_inner, anchor="nw")
         cache_canvas.configure(yscrollcommand=cache_scroll.set)
@@ -1566,36 +1954,37 @@ class NovelReaderApp:
 
         def _make_cache_card(parent, title, subtitle, icon, accent, kind):
             """创建一个缓存管理卡片。kind: 'text' or 'audio'."""
-            card = tk.Frame(parent, bg="#ffffff", highlightbackground="#e2e5ea", highlightthickness=1)
+            _card_bg = UI_THEMES.get(self.settings.get("ui_theme", "A·米黄暖读"), UI_THEMES["A·米黄暖读"])["field"]
+            card = tk.Frame(parent, bg=_card_bg, highlightbackground="#e2e5ea", highlightthickness=1)
             card.pack(fill="x", padx=14, pady=(12, 0))
 
             # 标题行
-            head = tk.Frame(card, bg="#ffffff")
+            head = tk.Frame(card, bg=_card_bg)
             head.pack(fill="x", padx=14, pady=(12, 4))
-            tk.Label(head, text=icon, font=("微软雅黑", 14), bg="#ffffff").pack(side="left")
-            tk.Label(head, text=title, font=("微软雅黑", 11, "bold"), fg=accent, bg="#ffffff").pack(side="left", padx=(6, 0))
-            loc_lbl = tk.Label(head, text="", font=("微软雅黑", 9), fg="#999999", bg="#ffffff")
+            tk.Label(head, text=icon, font=("微软雅黑", 14), bg=_card_bg).pack(side="left")
+            tk.Label(head, text=title, font=("微软雅黑", 11, "bold"), fg=accent, bg=_card_bg).pack(side="left", padx=(6, 0))
+            loc_lbl = tk.Label(head, text="", font=("微软雅黑", 9), fg="#999999", bg=_card_bg)
             loc_lbl.pack(side="right")
 
             # 副标题（精简说明）
             if subtitle:
-                tk.Label(card, text=subtitle, font=("微软雅黑", 9), fg="#888888", bg="#ffffff",
+                tk.Label(card, text=subtitle, font=("微软雅黑", 9), fg="#888888", bg=_card_bg,
                          wraplength=520, justify="left").pack(anchor="w", padx=14, pady=(0, 4))
 
             # 路径
             path_text = self._effective_text_cache_root() if kind == "text" else self._effective_tts_cache_root()
             path_lbl = tk.Label(card, text=path_text, font=("微软雅黑", 9), fg="#2b6cb0",
-                                bg="#ffffff", wraplength=520, justify="left", cursor="hand2")
+                                bg=_card_bg, wraplength=520, justify="left", cursor="hand2")
             path_lbl.pack(anchor="w", padx=14, pady=(2, 2))
             open_cmd = self._open_cache_folder if kind == "text" else self._open_tts_cache_folder
             path_lbl.bind("<Button-1>", lambda e: open_cmd())
 
             # 大小
-            size_lbl = tk.Label(card, text="正在统计…", font=("微软雅黑", 10), fg="#444444", bg="#ffffff")
+            size_lbl = tk.Label(card, text="正在统计…", font=("微软雅黑", 10), fg="#444444", bg=_card_bg)
             size_lbl.pack(anchor="w", padx=14, pady=(2, 6))
 
             # 按钮行
-            btn_row = tk.Frame(card, bg="#ffffff")
+            btn_row = tk.Frame(card, bg=_card_bg)
             btn_row.pack(anchor="w", padx=14, pady=(0, 12))
             if kind == "text":
                 ttk.Button(btn_row, text="自定义位置",
@@ -1639,7 +2028,7 @@ class NovelReaderApp:
         )
 
         # 底部留白
-        tk.Frame(cache_inner, bg="#f5f6f8", height=14).pack()
+        tk.Frame(cache_inner, bg=_about_bg, height=14).pack()
 
         # 统计大小（延迟到窗口显示后）
         def _refresh_sizes():
@@ -1652,6 +2041,66 @@ class NovelReaderApp:
         self._about_win = top
         top.focus_set()
         # 注：不使用 grab_set()，避免模态窗口内 filedialog/messagebox 被遮挡或无法交互
+
+    def _open_skin_picker(self):
+        """主题选择：六套控件风格（A-F），点击即切换，即时生效。"""
+        top = tk.Toplevel(self.root)
+        top.title("主题选择")
+        top.geometry("560x440")
+        top.minsize(480, 380)
+        top.transient(self.root)
+        self._center_window(top)
+        cur = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])
+        top.configure(bg=cur["bg"])
+
+        tk.Label(top, text="选择控件主题风格（点击即切换，即时生效）",
+                 bg=cur["bg"], fg=cur["muted"], font=("微软雅黑", 10)).pack(pady=(12, 8))
+
+        container = tk.Frame(top, bg=cur["bg"])
+        container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        for i in range(3):
+            container.grid_columnconfigure(i, weight=1)
+        for i in range(2):
+            container.grid_rowconfigure(i, weight=1)
+
+        current_name = self.settings.get("ui_theme", "D·原生微调")
+
+        def _make_switch(name, win):
+            def _sw(event=None):
+                self._apply_ui_theme(name)
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+            return _sw
+
+        for idx, (name, c) in enumerate(UI_THEMES.items()):
+            r, col = divmod(idx, 3)
+            is_cur = (name == current_name)
+            card = tk.Frame(container, bg=c["field"], relief="solid",
+                            bd=2 if is_cur else 1, cursor="hand2")
+            card.grid(row=r, column=col, padx=8, pady=8, sticky="nsew")
+
+            # 配色预览条
+            prev = tk.Frame(card, bg=c["bg"], height=36, cursor="hand2")
+            prev.pack(fill="x")
+            btn_prev = tk.Frame(prev, bg=c["btn"], width=56, height=22, cursor="hand2")
+            btn_prev.pack(side="left", padx=8, pady=7)
+            tk.Label(prev, text="Aa", bg=c["bg"], fg=c["fg"],
+                     font=("微软雅黑", 11, "bold"), cursor="hand2").pack(side="left", padx=(4, 0))
+
+            tk.Label(card, text=name, bg=c["field"], fg=c["fg"],
+                     font=("微软雅黑", 10, "bold"), cursor="hand2").pack(pady=(6, 2))
+            tk.Label(card, text=("✓ 当前" if is_cur else f"按钮 {c['btn']}"),
+                     bg=c["field"], fg=(c["accent"] if is_cur else c["muted"]),
+                     font=("微软雅黑", 8), cursor="hand2").pack(pady=(0, 6))
+
+            # 绑定点击切换（卡片及所有子控件）
+            _sw = _make_switch(name, top)
+            for w in (card, prev, btn_prev):
+                w.bind("<Button-1>", _sw)
+            for w in card.winfo_children():
+                w.bind("<Button-1>", _sw)
 
     def _copy_email(self):
         """复制作者邮箱到剪贴板。"""
@@ -2485,22 +2934,39 @@ class NovelReaderApp:
         nl_before = before.count("\n")
         mode = int(self.settings.get("paragraph_mode", 1))
         if mode == 3:
-            # 清理所有行：所有换行被删除，全文只有第 1 行
-            return 1, off - nl_before
+            # 清理所有行：所有换行被删除，正文只有第 1 行；加上标题占的行数
+            return self._body_start_line, off - nl_before
         line = nl_before + 1
         last_nl = before.rfind("\n")
         col = off - (last_nl + 1) if last_nl >= 0 else off
         if mode == 2:
             # 合并为一行：每个段落间多一个空行，原始第 L 段 → 渲染第 2L-1 行
-            return line * 2 - 1, col
-        return line, col
+            line = line * 2 - 1
+        # 加上章节标题占的行数，得到显示文本中的行号
+        return line + self._body_start_line - 1, col
 
     def _highlight_sentence(self, ci, off, text):
         content = self.book.chapters[ci].content
         line, col = self._transformed_pos(content, off)
         start = f"{line}.{col}"
+        # 结束位置：直接从 start 在显示文本中向后读取，遇到句末标点即停。
+        # （显示文本保留标点/空白，纯净朗读文本去除了它们，长度不一致，
+        #   不能直接用 len(text) 定位结束。）
+        end = start
         try:
-            end = self.text.index(f"{start}+{len(text)}c")
+            total_len = len(text) + 30  # 显示文本可能多出标点，留足余量
+            line_end = self.text.index(f"{start} lineend")
+            window_end = self.text.index(f"{start}+{total_len}c")
+            # 取 start 到（行尾与 start+len 的较小者）之间的字符
+            probe_end = self.text.index(f"{start} lineend")
+            probe_end = self.text.index(f"{start}+{total_len}c") \
+                if self.text.compare(f"{start}+{total_len}c", "<", line_end) \
+                else line_end
+            window = self.text.get(start, probe_end)
+            for i, ch in enumerate(window):
+                if ch in "。！？.!?；;\n":
+                    end = self.text.index(f"{start}+{i+1}c")
+                    break
         except Exception:
             end = start
         self.text.tag_remove("tts", "1.0", "end")
@@ -2624,13 +3090,15 @@ class NovelReaderApp:
     # ================= 书架收起/展开 =================
     def _toggle_shelf(self):
         try:
-            pane_paths = [str(p) for p in self._outer_paned.panes()]
+            pane_paths = [str(p) for p in self._inner_paned.panes()]
         except Exception:
             pane_paths = []
         if str(self._left) in pane_paths:
-            self._outer_paned.remove(self._left)
+            self._inner_paned.remove(self._left)
+            self._shelf_visible = False
         else:
-            self._outer_paned.insert(0, self._left, weight=0)
+            self._inner_paned.insert(0, self._left, weight=0)
+            self._shelf_visible = True
 
     # ================= 全屏模式 =================
     def _toggle_fullscreen(self, event=None):
@@ -2643,10 +3111,12 @@ class NovelReaderApp:
         self._fullscreen = True
         self.root.attributes("-fullscreen", True)
         self._toolbar.grid_remove()
+        self._shelf_was_visible = getattr(self, '_shelf_visible', False)
         try:
-            pane_paths = [str(p) for p in self._outer_paned.panes()]
+            pane_paths = [str(p) for p in self._inner_paned.panes()]
             if str(self._left) in pane_paths:
-                self._outer_paned.remove(self._left)
+                self._inner_paned.remove(self._left)
+                self._shelf_visible = False
         except Exception:
             pass
         self._overlay.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -2659,12 +3129,14 @@ class NovelReaderApp:
         self.root.attributes("-fullscreen", False)
         self._overlay.grid_remove()
         self._toolbar.grid()
-        try:
-            pane_paths = [str(p) for p in self._outer_paned.panes()]
-            if str(self._left) not in pane_paths:
-                self._outer_paned.insert(0, self._left, weight=0)
-        except Exception:
-            pass
+        if getattr(self, '_shelf_was_visible', False):
+            try:
+                pane_paths = [str(p) for p in self._inner_paned.panes()]
+                if str(self._left) not in pane_paths:
+                    self._inner_paned.insert(0, self._left, weight=0)
+                    self._shelf_visible = True
+            except Exception:
+                pass
 
     def _tick_overlay(self):
         try:

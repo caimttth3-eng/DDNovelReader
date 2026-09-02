@@ -49,3 +49,10 @@ downloads/
 # 临时测试/调试文件
 /_as_page.html
 /_flutter_ver.json
+
+# 临时字体/图标候选目录
+/_fonts/
+/_icon_candidates/
+
+# 测试样书（大文件不进仓库）
+/sample/*.pdf
