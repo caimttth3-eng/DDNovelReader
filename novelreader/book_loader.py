@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """小说文件解析引擎：把 txt / epub / mobi / azw3 / pdf / docx / html 统一解析为 BookContent。"""
 import os
 import re
@@ -101,7 +101,7 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-CONTENT_CACHE_VERSION = 4  # 缓存格式版本，改动解析结果后需递增以强制重解析
+CONTENT_CACHE_VERSION = 6  # normalize 支持全角空格分段，强制重解析  # 缓存格式版本，改动解析结果后需递增以强制重解析
 
 
 def normalize_body(text: str) -> str:
@@ -112,6 +112,10 @@ def normalize_body(text: str) -> str:
     if not text:
         return ""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # 网文常见的“全角空格分段”格式：段落之间没有换行，只用 　　 分隔。
+    # 若不转换，整章会被连成一段，导致“从该段朗读/高亮跟随”无法定位段落。
+    # 先转换双全角空格段首为换行，再处理其余单全角空格（缩进）。
+    text = text.replace("\u3000\u3000", "\n")
     text = text.replace("\u3000", "  ")
     text = text.replace("\ufeff", "")
     text = re.sub(r"[ \t]+\n", "\n", text)  # 行尾空格

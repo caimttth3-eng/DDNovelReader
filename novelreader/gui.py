@@ -172,6 +172,9 @@ class NovelReaderApp:
         self._chapter_sel_busy = False
         self._scrollbars = []
         self._highlight_index = None
+        self._resize_timer = None
+        self._pending_seek_pct = None
+        self._status_scroll_timer = None
 
         self._build_ui()
         self._apply_settings_to_ui()
@@ -184,15 +187,63 @@ class NovelReaderApp:
         self.root.after(1000, self._tick_overlay)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # 启动时自动打开上次阅读的书
-        if self.settings.get("auto_open_last", True):
-            last = self.storage.get_setting("last_book")
-            if last and last in self.storage.all_books():
-                self.open_book(last)
-        else:
-            self.root.title(f"多多朗读 v{__version__}")
-        self._refresh_bookshelf()
+        # 先让窗口显示：阅读区放加载占位并立即布局。若在窗口未映射时调用
+        # Text.see() 会触发全量布局重算（实测可达 9-11 秒），造成启动白屏卡顿；
+        # 窗口先显示、再加载，see() 即恢复正常（毫秒级），从根本上解决启动慢。
+        self._show_loading_placeholder()
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
 
+        # 异步启动加载：窗口已显示（Text 已布局）后再打开上次书/刷新书架，秒开不白屏
+        self._loading_done = False
+        self.root.after(30, self._startup_load)
+
+    # ================= 启动加载（窗口先显示 + 动画，避免白屏） =================
+    def _show_loading_placeholder(self):
+        """阅读区显示加载占位文字（启动动画底稿），窗口先显示不白屏。"""
+        try:
+            self.text.tag_configure("loading_text",
+                                    font=("微软雅黑", 20, "bold"),
+                                    foreground="#9a9a9a", justify="center")
+            self.text.configure(state="normal")
+            self.text.delete("1.0", "end")
+            self.text.insert("1.0", "\n\n\n\n\n正在加载书籍", "loading_text")
+            self.text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _animate_loading(self, n=0):
+        """启动加载动画：省略号循环刷新阅读区占位文字。"""
+        if getattr(self, "_loading_done", False):
+            return
+        try:
+            if not self.text.winfo_exists():
+                return
+            dots = "." * (n % 4)
+            self.text.configure(state="normal")
+            self.text.delete("1.0", "end")
+            self.text.insert("1.0", f"\n\n\n\n\n正在加载书籍{dots}", "loading_text")
+            self.text.configure(state="disabled")
+        except Exception:
+            pass
+        self.root.after(180, lambda: self._animate_loading(n + 1))
+
+    def _startup_load(self):
+        """窗口显示后的后台启动加载：打开上次书 + 刷新书架（Text 已布局，see() 快）。"""
+        try:
+            self._animate_loading()
+            if self.settings.get("auto_open_last", True):
+                last = self.storage.get_setting("last_book")
+                if last and last in self.storage.all_books():
+                    self.open_book(last)   # 内部会 _refresh_bookshelf
+            else:
+                self.root.title(f"多多朗读 v{__version__}")
+                self._refresh_bookshelf()
+        finally:
+            self._loading_done = True
         # 启动后台：一次性迁移旧音频缓存目录结构 + 校准大小索引（不阻塞 UI）
         self._migrate_tts_cache_bg()
 
@@ -235,13 +286,15 @@ class NovelReaderApp:
         return None
 
     def _default_geometry(self):
-        """按当前 DPI 缩放默认窗口尺寸，兼容 Windows 百分比缩放（125%/150%…）。"""
+        """默认窗口 1280x720 并居中显示（每次启动固定）。"""
         try:
-            dpi = self.root.winfo_fpixels("1i")
-            k = max(1.0, min(2.0, dpi / 96.0))
-            return f"{int(1180 * k)}x{int(760 * k)}"
+            w, h = 1280, 720
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            x = max(0, (sw - w) // 2)
+            y = max(0, (sh - h) // 2)
+            return f"{w}x{h}+{x}+{y}"
         except Exception:
-            return "1180x760"
+            return "1280x720+0+0"
 
     # ---------- 缓存目录 / 通用工具 ----------
     def _effective_tts_cache_root(self):
@@ -305,10 +358,11 @@ class NovelReaderApp:
     def _refresh_shelf_sizes_async(self):
         """后台线程计算书架中所有书籍的缓存大小，完成后逐行更新 Treeview。"""
         self._init_shelf_size_cache()
-        # 如果已有 worker 在运行，先停止
+        # 如果已有 worker 在运行，标记停止但只短暂等待（旧 worker 是 daemon，
+        # 由 stop 标记自然退出），避免每次刷新书架阻塞主线程等它
         if self._shelf_size_worker and self._shelf_size_worker.is_alive():
             self._shelf_size_stop.set()
-            self._shelf_size_worker.join(timeout=1)
+            self._shelf_size_worker.join(timeout=0.05)
         self._shelf_size_stop.clear()
 
         books = self.storage.all_books()
@@ -536,7 +590,8 @@ class NovelReaderApp:
 
     def _build_ui(self):
         self.root.title(f"多多朗读 v{__version__}")
-        self.root.geometry(self.settings.get("window_geometry") or self._default_geometry())
+        # 每次启动固定 1280x720 并居中
+        self.root.geometry(self._default_geometry())
         icon = self._icon_path()
         if icon:
             try:
@@ -713,7 +768,6 @@ class NovelReaderApp:
         self._ov_time = tk.Label(self._overlay, text="", fg="#e8e8e8", bg="#202124",
                                  font=("微软雅黑", 10, "bold"))
         self._ov_time.pack(side="right", padx=(0, 8), pady=6)
-
     def _build_toolbar(self, parent):
         bar = tk.Frame(parent)
         bar.grid(row=0, column=0, sticky="ew")
@@ -1558,9 +1612,12 @@ class NovelReaderApp:
                 return self._cache[bid]
             cached = self.storage.read_cache(bid)
             if cached:
-                content = book_loader.BookContent.from_dict(cached)
-                self._cache[bid] = content
-                return content
+                # 缓存版本校验：旧版本缓存可能是坏数据（如段落换行丢失），
+                # 版本不符时强制重新解析，避免“从该段朗读/高亮跟随”等依赖段落的功能失效
+                if int(cached.get("v", 0)) == book_loader.CONTENT_CACHE_VERSION:
+                    content = book_loader.BookContent.from_dict(cached)
+                    self._cache[bid] = content
+                    return content
         content = book_loader.parse_book(path)
         self.storage.write_cache(bid, content)
         self._cache[bid] = content
@@ -1580,7 +1637,12 @@ class NovelReaderApp:
             if cached:
                 self.book = book_loader.BookContent.from_dict(cached)
             else:
-                messagebox.showerror("打开失败", f"无法读取书籍文件：\n{meta['path']}")
+                # 打开失败不弹模态框（避免启动/切书时卡死主线程），状态栏提示并进入空状态
+                try:
+                    self._flash_status(f"无法读取书籍文件：{os.path.basename(meta['path'])}")
+                except Exception:
+                    pass
+                self._render_empty()
                 return
         prog = meta.get("progress") or {}
         self.chapter_idx = max(0, min(int(prog.get("chapter_idx", 0)), len(self.book.chapters) - 1))
@@ -1594,6 +1656,7 @@ class NovelReaderApp:
 
     def _populate_chapters(self):
         titles = [c.title for c in self.book.chapters]
+        self._chapter_titles_cache = titles
         self.chapter_cb["values"] = titles
         self.chapter_cb.set(titles[self.chapter_idx])
         self.chapter_list.delete(0, "end")
@@ -1602,6 +1665,21 @@ class NovelReaderApp:
         self.chapter_list.see(self.chapter_idx)
         self.chapter_list.selection_clear(0, "end")
         self.chapter_list.selection_set(self.chapter_idx)
+
+    def _sync_chapter_sel(self):
+        """切章时轻量同步目录选中态/章节下拉框，不重建整个列表（大目录下避免卡顿）。"""
+        try:
+            titles = getattr(self, "_chapter_titles_cache", None)
+            if titles is None or len(titles) != len(self.book.chapters):
+                titles = [c.title for c in self.book.chapters]
+                self._chapter_titles_cache = titles
+            if 0 <= self.chapter_idx < len(titles):
+                self.chapter_cb.set(titles[self.chapter_idx])
+            self.chapter_list.selection_clear(0, "end")
+            self.chapter_list.selection_set(self.chapter_idx)
+            self.chapter_list.see(self.chapter_idx)
+        except Exception:
+            pass
 
     def _render_chapter(self):
         if not self.book:
@@ -1623,7 +1701,8 @@ class NovelReaderApp:
         self._apply_font()
         self._tag_body()
         self._scroll_to_offset(self.char_offset)
-        self._populate_chapters()
+        # 轻量同步目录选中态/下拉框（不重建整个列表，避免大目录每次重建）
+        self._sync_chapter_sel()
         self._update_status()
         self._repin_reading()
 
@@ -1658,24 +1737,32 @@ class NovelReaderApp:
     # ---- 进度滑块（可拖动跳转） ----
     def _on_seek_press(self, event=None):
         self._seeking = True
+        self._pending_seek_pct = None
 
     def _on_seek_release(self, event=None):
         self._seeking = False
+        # 松手后一次性跳转；拖动过程中不渲染，避免每动一格都渲染整章导致卡顿
+        p = getattr(self, "_pending_seek_pct", None)
+        if p is not None:
+            self._pending_seek_pct = None
+            self._seek_to_percent(p)
 
     def _on_seek(self, value):
         # 仅响应用户拖动；程序自动更新进度时不触发跳转
         if not self.book or not self._seeking:
             return
-        self._seek_to_percent(float(value))
+        self._pending_seek_pct = float(value)
+        # 拖动中实时刷新百分比，便于用户精准定位目标进度
+        try:
+            self.percent_label.configure(text=f"{float(value):.1f}%")
+        except Exception:
+            pass
 
     def _seek_to_percent(self, pct):
+        import bisect
         target = max(0.0, min(100.0, pct)) / 100.0 * self.book.total_chars
-        ci = 0
-        for i, c in enumerate(self.book.cum):
-            if c <= target:
-                ci = i
-            else:
-                break
+        cum = self.book.cum
+        ci = bisect.bisect_right(cum, target) - 1
         ci = max(0, min(ci, len(self.book.chapters) - 1))
         off = int(target - self.book.cum[ci])
         off = max(0, min(off, len(self.book.chapters[ci].content)))
@@ -1690,14 +1777,39 @@ class NovelReaderApp:
         if not self.book:
             return
         self.char_offset = self._current_offset()
-        self._update_status()
+        self._schedule_status_update()
         self._schedule_save()
 
+    def _schedule_status_update(self):
+        """滚动高频时合并状态栏刷新（进度百分比/章节位置），避免每帧重复配置标签。"""
+        t = getattr(self, "_status_scroll_timer", None)
+        if t:
+            try:
+                self.root.after_cancel(t)
+            except Exception:
+                pass
+        self._status_scroll_timer = self.root.after(50, self._flush_status_update)
+
+    def _flush_status_update(self):
+        self._status_scroll_timer = None
+        try:
+            self._update_status()
+        except Exception:
+            pass
+
     def _on_text_resize(self, event=None):
-        """窗口缩放/移动/初始化等触发视口变化：朗读中把高亮重新钉到顶部。"""
-        if self.book and self.tts.is_playing():
-            self._repin_reading()
-        self._on_scroll(event)
+        """窗口缩放/移动/初始化触发视口变化：朗读中把高亮重新钉到顶部。
+
+        必须直接执行而不能用防抖合并：窗口持续调整时 <Configure> 事件狂发，
+        若用 after(120ms) 防抖会被反复取消，_repin_reading() 永远不触发，
+        导致朗读高亮在窗口变化后跳出视口、无法跟随。
+        """
+        try:
+            if self.book and self.tts.is_playing():
+                self._repin_reading()
+            self._on_scroll(event)
+        except Exception:
+            pass
 
     def _current_offset(self):
         try:
@@ -1745,24 +1857,74 @@ class NovelReaderApp:
             return
         try:
             line = int(idx.split(".")[0])
+            col = int(idx.split(".")[1])
         except Exception:
             return
-        # 向上找到段落起始显示行（空行之前的一行）
-        start_line = line
-        try:
-            while start_line > 1:
-                prev = self.text.get(f"{start_line - 1}.0", f"{start_line - 1}.end")
-                if not prev.strip():
-                    break
-                start_line -= 1
-        except Exception:
-            pass
-        off = self._display_line_to_offset(start_line)
+        mode = int(self.settings.get("paragraph_mode", 1))
+        content = self.book.chapters[self.chapter_idx].content
+        if mode == 3:
+            # 清理所有行模式：全文只有一行，用点击处的列号映射回原文偏移
+            raw_off = self._display_col_to_raw_offset(col)
+        elif mode == 2:
+            # 合并为一行模式：段间有空行，向上找到段落起始显示行（空行之前的一行）
+            start_line = line
+            try:
+                while start_line > 1:
+                    prev = self.text.get(f"{start_line - 1}.0", f"{start_line - 1}.end")
+                    if not prev.strip():
+                        break
+                    start_line -= 1
+            except Exception:
+                pass
+            raw_off = self._display_line_to_offset(start_line)
+        else:
+            # 不压缩模式：每段一行无空行，直接定位点击行对应的段落起点
+            raw_off = self._display_line_to_offset(line)
+        if "\n" in content:
+            # 正常分段书：从该段起点朗读
+            if mode == 3:
+                nl = content.rfind("\n", 0, raw_off)
+                off = (nl + 1) if nl >= 0 else 0
+            else:
+                off = raw_off
+        else:
+            # 无换行符的书（空格分段等）：“段落”无意义，改为从本句起点开始朗读
+            off = self._sentence_start(raw_off)
         self._goto_chapter(self.chapter_idx, off)  # 渲染/保存；正在朗读则自动继续
         if not self.tts.is_active():
             self.tts.start(self.book, self.chapter_idx, off)
             self._set_tts_ui("playing")
         self._flash_status("已从该段开始朗读")
+
+    def _display_col_to_raw_offset(self, col):
+        """模式3：显示列号（删除换行后）→ 原文偏移（不回退段）。
+
+        col 是 0-based 索引（前面有 col 个非换行字符），因此第 col 个
+        非换行字符即 count == col 时（count 也从 0 计）。
+        """
+        content = self.book.chapters[self.chapter_idx].content
+        col = max(0, int(col))
+        if col == 0:
+            return 0
+        count = 0
+        for i, ch in enumerate(content):
+            if ch == "\n":
+                continue
+            if count == col:
+                return i
+            count += 1
+        return len(content)
+
+    def _sentence_start(self, off):
+        """往回找到 off 所在句子的起点（上一个句末标点之后）。"""
+        content = self.book.chapters[self.chapter_idx].content
+        off = max(0, min(off, len(content)))
+        i = off
+        while i > 0:
+            i -= 1
+            if content[i] in "。！？!?…；;":
+                return i + 1
+        return 0
 
     def _scroll_to_offset(self, offset):
         if not self.book:
@@ -1803,7 +1965,7 @@ class NovelReaderApp:
         self.chapter_idx = ci
         self.char_offset = offset
         self._render_chapter()
-        self._save_now()
+        self._schedule_save()
         if was_active:
             # 换章后继续朗读：从新章节当前位置接着读
             self.tts.start(self.book, ci, offset)
@@ -2605,10 +2767,8 @@ class NovelReaderApp:
 
         bar = tk.Frame(win)
         bar.pack(fill="x", padx=12, pady=4)
-        tk.Button(bar, text="全部开始", width=9, command=self._cache_mgr_all_start).pack(side="left")
-        tk.Button(bar, text="全部暂停", width=9, command=self._cache_mgr_all_pause).pack(side="left", padx=4)
-        tk.Button(bar, text="全部继续", width=9, command=self._cache_mgr_all_resume).pack(side="left", padx=4)
-        tk.Button(bar, text="全部停止", width=9, command=self._cache_mgr_all_stop).pack(side="left", padx=4)
+        tk.Button(bar, text="全部开始/继续", width=12, command=self._cache_mgr_all_start).pack(side="left")
+        tk.Button(bar, text="全部暂停", width=10, command=self._cache_mgr_all_pause).pack(side="left", padx=4)
 
         frame = tk.Frame(win)
         frame.pack(fill="both", expand=True, padx=12, pady=2)
@@ -2639,10 +2799,8 @@ class NovelReaderApp:
 
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=6)
-        tk.Button(ops, text="开始缓存", width=10, command=self._cache_mgr_start).pack(side="left")
+        tk.Button(ops, text="开始/继续", width=10, command=self._cache_mgr_start).pack(side="left")
         tk.Button(ops, text="暂停", width=7, command=self._cache_mgr_pause).pack(side="left", padx=4)
-        tk.Button(ops, text="继续", width=7, command=self._cache_mgr_resume).pack(side="left", padx=4)
-        tk.Button(ops, text="停止", width=7, command=self._cache_mgr_stop).pack(side="left", padx=4)
         tk.Button(ops, text="章节选择…", width=10, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
         tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
@@ -2666,9 +2824,15 @@ class NovelReaderApp:
             st = self.tts.book_cache_status(bid)
         except Exception:
             st = None
+        if not st:
+            # 无正在运行的任务：读历史进度索引（重启/已结束后也能显示进度）
+            try:
+                st = self.tts.book_cache_history(bid)
+            except Exception:
+                st = None
         state = st["state"] if st else None
         if state == "caching":
-            return "● 缓存中", "caching", st
+            return "● 下载中", "caching", st
         if state == "building":
             return "⏳ 准备中…", "building", st
         if state == "paused":
@@ -2677,16 +2841,17 @@ class NovelReaderApp:
             return "✔ 已完成", "done", st
         if state == "cancelled":
             return "已取消", "", st
-        return "未缓存", "", st
+        return "未开始", "", st
 
     def _cache_mgr_row_values(self, bid, meta):
         stat_s, tag, st = self._cache_mgr_state_of(bid)
         if st and st.get("total"):
             d, t = st["done"], st["total"]
             pct = (d / t * 100) if t else 0
-            prog_s = f"{self._cache_bar_str(pct)} {d}/{t}（{pct:.0f}%）"
+            prog_s = f"{self._cache_bar_str(pct)} {pct:.0f}% · {d}/{t}"
         else:
-            prog_s = "-"
+            size0 = self.tts.tts_cache_size(bid)
+            prog_s = f"已缓存 {self._format_bytes(size0)}" if size0 else "-"
         size = self.tts.tts_cache_size(bid)
         size_s = self._format_bytes(size) if size else "-"
         title = meta.get("title") or os.path.basename(meta.get("path", ""))
@@ -2750,7 +2915,8 @@ class NovelReaderApp:
         except Exception:
             return []
 
-    def _cache_mgr_start_one(self, bid, chapter_indices=None, resume=False):
+    def _cache_mgr_start_one(self, bid, chapter_indices=None):
+        """开始/继续：暂停中→恢复；缓存中→跳过；其余→从历史进度续传（已缓存自动跳过）。"""
         meta = self.storage.get_book(bid)
         if not meta:
             return
@@ -2763,7 +2929,16 @@ class NovelReaderApp:
                     book = self._cache[bid]
                 else:
                     book = self._load_book(meta["path"])
-                st = self.tts.start_book_cache(book, bid, chapter_indices, resume)
+                try:
+                    st = self.tts.book_cache_status(bid)
+                except Exception:
+                    st = None
+                if st and st["state"] == "paused":
+                    self.tts.resume_book_cache(bid)
+                    return
+                if st and st["state"] in ("caching", "building"):
+                    return  # 已在下载，无需重复开始
+                st = self.tts.start_book_cache(book, bid, chapter_indices, resume=True)
                 if st and st.get("state") == "unsupported":
                     self.root.after(0, lambda: messagebox.showinfo(
                         "提示", "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n请在「语音」下拉框选择 Edge 音色后再试。"))
@@ -2791,29 +2966,6 @@ class NovelReaderApp:
     def _cache_mgr_all_pause(self):
         for bid in list(self.storage.all_books().keys()):
             self.tts.pause_book_cache(bid)
-
-    def _cache_mgr_resume(self):
-        for bid in self._cache_mgr_selected_bids():
-            self.tts.resume_book_cache(bid)
-
-    def _cache_mgr_all_resume(self):
-        for bid in list(self.storage.all_books().keys()):
-            try:
-                st = self.tts.book_cache_status(bid)
-                if st and st["state"] == "paused":
-                    self.tts.resume_book_cache(bid)
-            except Exception:
-                pass
-
-    def _cache_mgr_stop(self):
-        for bid in self._cache_mgr_selected_bids():
-            self.tts.cancel_book_cache(bid)
-        self._cache_mgr_refresh_rows()
-
-    def _cache_mgr_all_stop(self):
-        for bid in list(self.storage.all_books().keys()):
-            self.tts.cancel_book_cache(bid)
-        self._cache_mgr_refresh_rows()
 
     def _cache_mgr_delete_audio(self):
         bids = self._cache_mgr_selected_bids()
@@ -3322,6 +3474,9 @@ class NovelReaderApp:
 
     def _clear_highlight(self):
         self._highlight_index = None
+        self._resize_timer = None
+        self._pending_seek_pct = None
+        self._status_scroll_timer = None
         try:
             self.text.tag_remove("tts", "1.0", "end")
         except Exception:

@@ -880,6 +880,50 @@ class SpeechController:
             return None
         return cacher.status()
 
+    def book_cache_history(self, book_id=None):
+        """返回该书的历史缓存进度（读 progress.json 索引，不扫 mp3 文件）。
+
+        即使没有正在运行/刚启动的缓存任务（如重启软件、任务已结束），
+        也能返回上次缓存的 done/total/state，供下载管理器显示"已下载 xx%"。
+        无任何历史进度时返回 None。
+        """
+        bid = str(book_id or self._book_id or "book")
+        root = os.path.join(self._tts_cache_dir or "", bid)
+        best = None
+        try:
+            if os.path.isdir(root):
+                for v in os.listdir(root):
+                    vd = os.path.join(root, v)
+                    if not os.path.isdir(vd):
+                        continue
+                    for r in os.listdir(vd):
+                        pp = os.path.join(vd, r, "progress.json")
+                        if not os.path.isfile(pp):
+                            continue
+                        try:
+                            with open(pp, "r", encoding="utf-8") as f:
+                                d = json.load(f)
+                            if (best is None
+                                    or (d.get("updated_at") or 0) > (best.get("updated_at") or 0)):
+                                best = d
+                        except Exception:
+                            pass
+        except Exception:
+            return None
+        if best is None:
+            return None
+        # 无 active 任务时不可能真的在缓存/构建：归一化为 paused
+        st = best.get("state", "paused")
+        if st in ("caching", "building", "idle"):
+            st = "paused"
+        return {
+            "state": st,
+            "done": int(best.get("done", 0)),
+            "total": int(best.get("total", 0)),
+            "bytes_written": 0,
+            "history": True,
+        }
+
     def chapters_cached_status(self, book, book_id):
         """返回每章是否已完全缓存的 dict {chapter_idx: bool}。
 
