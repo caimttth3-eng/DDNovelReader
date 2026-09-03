@@ -193,6 +193,9 @@ class NovelReaderApp:
             self.root.title(f"多多朗读 v{__version__}")
         self._refresh_bookshelf()
 
+        # 启动后台：一次性迁移旧音频缓存目录结构 + 校准大小索引（不阻塞 UI）
+        self._migrate_tts_cache_bg()
+
     # ================= UI 构建 =================
     def _icon_path(self):
         """解析程序图标路径（优先用户自定义皮肤图标，其次默认 app.ico）。"""
@@ -250,10 +253,12 @@ class NovelReaderApp:
         return resolve_tts_cache_dir(custom)
 
     def _audio_cache_size(self, bid):
-        """某本书的音频缓存总字节数（跨语音/语速目录）。"""
+        """某本书的音频缓存总字节数（跨语音/语速目录）。
+
+        读大小索引，不遍历数万细碎 mp3 文件。
+        """
         try:
-            root = self._effective_tts_cache_root()
-            return sum(dir_size(d) for d in audio_cache_dirs(root, bid))
+            return self.tts.tts_cache_size(bid)
         except Exception:
             return 0
 
@@ -276,6 +281,27 @@ class NovelReaderApp:
             self._shelf_size_worker = None
             self._shelf_size_stop = threading.Event()
 
+    def _migrate_tts_cache_bg(self):
+        """启动后台一次性任务：迁移旧音频缓存目录结构 + 校准大小索引。
+
+        旧结构 `tts_cache/<语音>/<语速>/<book_id>/` → 新结构 `tts_cache/<book_id>/<语音>/<语速>/`，
+        完成后对全部书校准一次大小索引（此后缓存中增量维护，不再反复扫盘）。
+        """
+        def worker():
+            try:
+                from .storage import migrate_old_tts_layout
+                root = self._effective_tts_cache_root()
+                moved = migrate_old_tts_layout(root)
+                if moved:
+                    self.root.after(0, lambda: self._flash_status(
+                        f"音频缓存目录已迁移 {moved} 个到新版（按书分目录）结构"))
+                self.tts.tts_cache_calibrate()
+                # 校准完成后刷新书架大小列（读索引，快）
+                self.root.after(0, lambda: self._refresh_shelf_sizes_async())
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
     def _refresh_shelf_sizes_async(self):
         """后台线程计算书架中所有书籍的缓存大小，完成后逐行更新 Treeview。"""
         self._init_shelf_size_cache()
@@ -286,8 +312,8 @@ class NovelReaderApp:
         self._shelf_size_stop.clear()
 
         books = self.storage.all_books()
-        # 仅对缺失持久化缓存大小的书（老数据迁移）做一次后台校准；其余零扫描
-        bids = [k for k in books if not self.storage.has_cache_size(k)]
+        # 全部书快速刷新：音频大小读索引、文本大小单文件 getsize，零扫盘，因此每次刷新都精确
+        bids = list(books.keys())
         if not bids:
             return
 
@@ -334,6 +360,7 @@ class NovelReaderApp:
         try:
             self.storage.set_book_cache_size(bid, 0)
             self._shelf_size_cache[bid] = 0
+            self.tts.tts_cache_invalidate(bid)
         except Exception:
             pass
 
@@ -2274,14 +2301,17 @@ class NovelReaderApp:
             self.settings["tts_cache_dir"] = new
             self.storage.set_setting("tts_cache_dir", new)
             self.tts.set_tts_cache_dir(self._effective_tts_cache_root())
+            # 新位置后台一次性校准（索引随转移一起移动，校准补漏）
+            threading.Thread(
+                target=lambda: self.tts.tts_cache_calibrate(), daemon=True
+            ).start()
         label = "正文解析缓存" if kind == "text" else "音频缓存"
         messagebox.showinfo("转移完成", f"{label}已转移到：\n{new}")
 
     # ---------- 音频缓存目录管理 ----------
     def _update_tts_cache_size_label(self, lbl):
         try:
-            root = self._effective_tts_cache_root()
-            siz = dir_size(root)
+            siz = self.tts.tts_cache_size()
             loc = "默认位置" if not (self.settings.get("tts_cache_dir") or "") else "自定义位置"
             lbl.configure(text=f"音频缓存总大小：{self._format_bytes(siz)}（{loc}）")
         except Exception:
@@ -2363,6 +2393,10 @@ class NovelReaderApp:
                     n += 1
                 except Exception:
                     pass
+        except Exception:
+            pass
+        try:
+            self.tts.tts_cache_invalidate()
         except Exception:
             pass
         if size_lbl is not None:
@@ -2482,26 +2516,26 @@ class NovelReaderApp:
     def _update_book_cache_ui(self):
         """更新「整本缓存」按钮与状态栏进度，并实时持久化缓存大小。"""
         try:
-            st = self.tts.book_cache_status()
+            st = self.tts.book_cache_status(self.current_bid)
         except Exception:
             st = None
         if st and self.current_bid:
             try:
                 bid = self.current_bid
-                total = getattr(self, "_book_cache_base_size", 0) + int(
-                    st.get("bytes_written", 0)
-                )
+                last_persists = getattr(self, "_book_cache_last_persists", {})
+                # 读索引（文本+音频），零扫盘
+                total = self._book_total_cache_size(bid)
                 self._shelf_size_cache[bid] = total
                 state = st["state"]
                 now = time.time()
-                last = getattr(self, "_book_cache_last_persist", 0)
+                last = last_persists.get(bid, 0)
                 if state in ("paused", "done", "cancelled"):
                     self.storage.set_book_cache_size(bid, total)
-                    self._book_cache_last_persist = now
+                    self._book_cache_last_persists[bid] = now
                 elif state == "caching" and now - last > 5:
                     # 缓存进行中每 5 秒持久化一次，避免频繁写 library.json
                     self.storage.set_book_cache_size(bid, total)
-                    self._book_cache_last_persist = now
+                    self._book_cache_last_persists[bid] = now
             except Exception:
                 pass
         if not st:
@@ -2543,53 +2577,323 @@ class NovelReaderApp:
             self.tts_cache_btn.configure(text="整本缓存")
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))
 
+    # ================= 整本缓存：下载管理器（多书任务列表） =================
     def _open_cache_dialog(self):
-        """整本语音缓存管理窗口：开始/暂停/继续/章节选择/容量/自动关机。"""
-        if not self.book:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
-            return
+        """整本缓存管理窗口（下载管理器）：列出书架所有书，多本可同时缓存。"""
         if getattr(self, "_cache_dlg", None) and self._cache_dlg.winfo_exists():
             try:
                 self._cache_dlg.lift()
             except Exception:
                 pass
             return
+        self._cache_mgr_target_bid = None
+        self._cache_mgr_target_book = None
 
         win = tk.Toplevel(self.root)
-        win.title("整本语音缓存")
+        win.title("整本缓存管理（多书）")
+        win.geometry("880x600")
+        win.minsize(720, 460)
+        win.transient(self.root)
+        self._center_window(win)
+        self._cache_dlg = win
+
+        tk.Label(
+            win,
+            text="整本缓存：每本书一条任务，可多本同时缓存；音频体积较大，请慎用。双击或点「章节选择」进入章节。",
+            fg="#b00020", font=("微软雅黑", 9), anchor="w", wraplength=840,
+        ).pack(fill="x", padx=12, pady=(8, 2))
+
+        bar = tk.Frame(win)
+        bar.pack(fill="x", padx=12, pady=4)
+        tk.Button(bar, text="全部开始", width=9, command=self._cache_mgr_all_start).pack(side="left")
+        tk.Button(bar, text="全部暂停", width=9, command=self._cache_mgr_all_pause).pack(side="left", padx=4)
+        tk.Button(bar, text="全部继续", width=9, command=self._cache_mgr_all_resume).pack(side="left", padx=4)
+        tk.Button(bar, text="全部停止", width=9, command=self._cache_mgr_all_stop).pack(side="left", padx=4)
+
+        frame = tk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=12, pady=2)
+        tree = ttk.Treeview(
+            frame, columns=("title", "status", "progress", "size"),
+            show="headings", selectmode="extended",
+        )
+        tree.heading("title", text="书名")
+        tree.heading("status", text="状态")
+        tree.heading("progress", text="进度")
+        tree.heading("size", text="缓存大小")
+        tree.column("title", width=280, anchor="w")
+        tree.column("status", width=90, anchor="center")
+        tree.column("progress", width=230, anchor="center")
+        tree.column("size", width=110, anchor="center")
+        sb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        tree.tag_configure("caching", foreground="#1a6bbd")
+        tree.tag_configure("paused", foreground="#c0392b")
+        tree.tag_configure("done", foreground="#1a7a3a")
+        tree.tag_configure("building", foreground="#8a6d00")
+        tree.tag_configure("cur", background="#e6effb")
+        tree.bind("<Double-1>", lambda e: self._cache_mgr_open_selected())
+        tree.bind("<Button-3>", self._cache_mgr_menu)
+        self._cache_tree = tree
+
+        ops = tk.Frame(win)
+        ops.pack(fill="x", padx=12, pady=6)
+        tk.Button(ops, text="开始缓存", width=10, command=self._cache_mgr_start).pack(side="left")
+        tk.Button(ops, text="暂停", width=7, command=self._cache_mgr_pause).pack(side="left", padx=4)
+        tk.Button(ops, text="继续", width=7, command=self._cache_mgr_resume).pack(side="left", padx=4)
+        tk.Button(ops, text="停止", width=7, command=self._cache_mgr_stop).pack(side="left", padx=4)
+        tk.Button(ops, text="章节选择…", width=10, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
+        tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
+        tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
+
+        self._cache_mgr_status = tk.Label(win, text="", anchor="w", fg="#666666", font=("微软雅黑", 9))
+        self._cache_mgr_status.pack(fill="x", padx=12, pady=(0, 8))
+
+        self._cache_mgr_refresh_rows()
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        win.after(400, self._cache_mgr_tick, win)
+
+    # ---------- 下载管理器：行与刷新 ----------
+    @staticmethod
+    def _cache_bar_str(pct):
+        pct = max(0.0, min(100.0, float(pct)))
+        filled = int(pct / 100 * 10)
+        return "█" * filled + "░" * (10 - filled)
+
+    def _cache_mgr_state_of(self, bid):
+        try:
+            st = self.tts.book_cache_status(bid)
+        except Exception:
+            st = None
+        state = st["state"] if st else None
+        if state == "caching":
+            return "● 缓存中", "caching", st
+        if state == "building":
+            return "⏳ 准备中…", "building", st
+        if state == "paused":
+            return "⏸ 已暂停", "paused", st
+        if state == "done":
+            return "✔ 已完成", "done", st
+        if state == "cancelled":
+            return "已取消", "", st
+        return "未缓存", "", st
+
+    def _cache_mgr_row_values(self, bid, meta):
+        stat_s, tag, st = self._cache_mgr_state_of(bid)
+        if st and st.get("total"):
+            d, t = st["done"], st["total"]
+            pct = (d / t * 100) if t else 0
+            prog_s = f"{self._cache_bar_str(pct)} {d}/{t}（{pct:.0f}%）"
+        else:
+            prog_s = "-"
+        size = self.tts.tts_cache_size(bid)
+        size_s = self._format_bytes(size) if size else "-"
+        title = meta.get("title") or os.path.basename(meta.get("path", ""))
+        if bid == self.current_bid:
+            tag = (tag + " cur").strip()
+        return (title, stat_s, prog_s, size_s), tag
+
+    def _cache_mgr_refresh_rows(self):
+        tree = self._cache_tree
+        tree.delete(*tree.get_children())
+        for bid, meta in self.storage.all_books().items():
+            vals, tag = self._cache_mgr_row_values(bid, meta)
+            tree.insert("", "end", iid=bid, values=vals, tags=(tag,))
+        self._cache_mgr_update_status()
+
+    def _cache_mgr_update_status(self):
+        try:
+            books = self.storage.all_books()
+            caching = sum(1 for b in books if self._is_caching(b))
+            total = self.tts.tts_cache_size()
+            sel = len(self._cache_tree.selection()) if hasattr(self, "_cache_tree") else 0
+            self._cache_mgr_status.configure(
+                text=f"已选 {sel} 本 · 缓存中 {caching} 本 · 音频缓存总大小 {self._format_bytes(total)}"
+            )
+        except Exception:
+            pass
+
+    def _is_caching(self, bid):
+        try:
+            st = self.tts.book_cache_status(bid)
+            return st and st["state"] in ("caching", "building")
+        except Exception:
+            return False
+
+    def _cache_mgr_tick(self, win):
+        try:
+            if not win.winfo_exists():
+                return
+        except Exception:
+            return
+        try:
+            tree = self._cache_tree
+            for bid, meta in self.storage.all_books().items():
+                if not tree.exists(bid):
+                    continue
+                vals, tag = self._cache_mgr_row_values(bid, meta)
+                tree.item(bid, values=vals, tags=(tag,))
+            self._cache_mgr_update_status()
+        except Exception:
+            pass
+        try:
+            if win.winfo_exists():
+                win.after(400, self._cache_mgr_tick, win)
+        except Exception:
+            pass
+
+    # ---------- 下载管理器：操作 ----------
+    def _cache_mgr_selected_bids(self):
+        try:
+            return list(self._cache_tree.selection())
+        except Exception:
+            return []
+
+    def _cache_mgr_start_one(self, bid, chapter_indices=None, resume=False):
+        meta = self.storage.get_book(bid)
+        if not meta:
+            return
+
+        def worker():
+            try:
+                if bid == self.current_bid and self.book is not None:
+                    book = self.book
+                elif bid in self._cache:
+                    book = self._cache[bid]
+                else:
+                    book = self._load_book(meta["path"])
+                st = self.tts.start_book_cache(book, bid, chapter_indices, resume)
+                if st and st.get("state") == "unsupported":
+                    self.root.after(0, lambda: messagebox.showinfo(
+                        "提示", "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n请在「语音」下拉框选择 Edge 音色后再试。"))
+            except Exception as e:
+                self.root.after(0, lambda e=e: messagebox.showinfo("提示", f"缓存失败：{e}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _cache_mgr_start(self):
+        bids = self._cache_mgr_selected_bids()
+        if not bids:
+            messagebox.showinfo("提示", "请先在列表中选择至少一本书", parent=self._cache_dlg)
+            return
+        for bid in bids:
+            self._cache_mgr_start_one(bid)
+
+    def _cache_mgr_all_start(self):
+        for bid in list(self.storage.all_books().keys()):
+            self._cache_mgr_start_one(bid)
+        self._cache_mgr_refresh_rows()
+
+    def _cache_mgr_pause(self):
+        for bid in self._cache_mgr_selected_bids():
+            self.tts.pause_book_cache(bid)
+
+    def _cache_mgr_all_pause(self):
+        for bid in list(self.storage.all_books().keys()):
+            self.tts.pause_book_cache(bid)
+
+    def _cache_mgr_resume(self):
+        for bid in self._cache_mgr_selected_bids():
+            self.tts.resume_book_cache(bid)
+
+    def _cache_mgr_all_resume(self):
+        for bid in list(self.storage.all_books().keys()):
+            try:
+                st = self.tts.book_cache_status(bid)
+                if st and st["state"] == "paused":
+                    self.tts.resume_book_cache(bid)
+            except Exception:
+                pass
+
+    def _cache_mgr_stop(self):
+        for bid in self._cache_mgr_selected_bids():
+            self.tts.cancel_book_cache(bid)
+        self._cache_mgr_refresh_rows()
+
+    def _cache_mgr_all_stop(self):
+        for bid in list(self.storage.all_books().keys()):
+            self.tts.cancel_book_cache(bid)
+        self._cache_mgr_refresh_rows()
+
+    def _cache_mgr_delete_audio(self):
+        bids = self._cache_mgr_selected_bids()
+        if not bids:
+            messagebox.showinfo("提示", "请先选择要删除音频缓存的书", parent=self._cache_dlg)
+            return
+        if not messagebox.askyesno(
+            "删除音频缓存",
+            f"确定删除选中的 {len(bids)} 本书的音频缓存？\n（朗读需重新联网合成）",
+            parent=self._cache_dlg,
+        ):
+            return
+        for bid in bids:
+            self._delete_audio_cache(bid)
+        self._cache_mgr_refresh_rows()
+
+    def _cache_mgr_open_selected(self):
+        bids = self._cache_mgr_selected_bids()
+        if not bids:
+            messagebox.showinfo("提示", "请先选择一本书", parent=self._cache_dlg)
+            return
+        self._open_book_cache_dialog(bids[0])
+
+    def _cache_mgr_menu(self, event):
+        try:
+            iid = self._cache_tree.identify_row(event.y)
+            if iid and iid not in self._cache_tree.selection():
+                self._cache_tree.selection_set(iid)
+        except Exception:
+            pass
+        m = tk.Menu(self._cache_dlg, tearoff=0)
+        m.add_command(label="打开该书缓存…", command=self._cache_mgr_open_selected)
+        m.add_command(label="删除音频缓存", command=self._cache_mgr_delete_audio)
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    # ================= 整本缓存：单书章节选择窗口 =================
+    def _open_book_cache_dialog(self, bid):
+        meta = self.storage.get_book(bid)
+        if not meta:
+            return
+        if bid == self.current_bid and self.book is not None:
+            book = self.book
+        else:
+            try:
+                book = self._load_book(meta["path"])
+            except Exception:
+                cached = self.storage.read_cache(bid)
+                if cached:
+                    book = book_loader.BookContent.from_dict(cached)
+                else:
+                    messagebox.showerror("无法打开", f"无法读取书籍文件：\n{meta['path']}")
+                    return
+        self._cache_mgr_target_bid = bid
+        self._cache_mgr_target_book = book
+
+        win = tk.Toplevel(self.root)
+        win.title("整本语音缓存 - 章节选择")
         win.geometry("660x740")
         win.minsize(600, 620)
         win.transient(self.root)
         self._center_window(win)
-        self._cache_dlg = win
+        self._cache_book_dlg = win
         self._cache_sel = {}
         self._cache_busy = True
 
-        # 顶部信息
-        info = f"书籍：{self.book.title}    章节：{len(self.book.chapters)}"
+        info = f"书籍：{book.title}    章节：{len(book.chapters)}"
         tk.Label(win, text=info, anchor="w", font=("微软雅黑", 10, "bold")).pack(
             fill="x", padx=12, pady=(10, 2)
         )
-        self._cache_info2 = tk.Label(
-            win,
-            text="",
-            anchor="w",
-            fg="#666666",
-            font=("微软雅黑", 9),
-        )
+        self._cache_info2 = tk.Label(win, text="", anchor="w", fg="#666666", font=("微软雅黑", 9))
         self._cache_info2.pack(fill="x", padx=12)
 
-        # 进度条上方的使用警示说明
         tk.Label(
             win,
             text="整本缓存功能用于网络不稳定时提前缓存减少卡顿；缓存音频体积较大，请慎用。",
-            fg="#b00020",
-            font=("微软雅黑", 9),
-            anchor="w",
-            justify="left",
-            wraplength=600,
+            fg="#b00020", font=("微软雅黑", 9), anchor="w", justify="left", wraplength=600,
         ).pack(fill="x", padx=12, pady=(8, 0))
-        # 进度条
         self._cache_bar = ttk.Progressbar(win, maximum=100, value=0)
         self._cache_bar.pack(fill="x", padx=12, pady=(6, 4))
         self._cache_prog = tk.Label(win, text="尚未开始", anchor="w", font=("微软雅黑", 9))
@@ -2597,7 +2901,6 @@ class NovelReaderApp:
         self._cache_disk = tk.Label(win, text="缓存已占容量：0 MB", anchor="w", fg="#1a6bbd", font=("微软雅黑", 9))
         self._cache_disk.pack(fill="x", padx=12, pady=(2, 4))
 
-        # 章节选择
         tk.Label(win, text="选择要缓存的章节（Ctrl/Shift 可多选）：", anchor="w").pack(
             fill="x", padx=12, pady=(8, 2)
         )
@@ -2608,20 +2911,18 @@ class NovelReaderApp:
         lb.configure(yscrollcommand=sb.set)
         lb.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        for ch in self.book.chapters:
+        for ch in book.chapters:
             lb.insert("end", ch.title)
         self._cache_lb = lb
 
-        # 章节选择快捷按钮
         btns = tk.Frame(win)
         btns.pack(fill="x", padx=12, pady=6)
-        cur = getattr(self, "chapter_idx", 0)
+        cur = self.chapter_idx if bid == self.current_bid else 0
         tk.Button(btns, text="全选", width=8, command=lambda: self._cache_select_all()).pack(side="left")
         tk.Button(btns, text="反选", width=8, command=lambda: self._cache_select_invert()).pack(side="left", padx=4)
         tk.Button(btns, text="从本章起", width=8, command=lambda: self._cache_select_from(cur)).pack(side="left", padx=4)
         tk.Label(btns, text="续传：已缓存过的句子自动跳过，无需重复下载", fg="#888888", font=("微软雅黑", 8)).pack(side="right")
 
-        # 自动关机
         self._cache_shutdown_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             win,
@@ -2630,7 +2931,6 @@ class NovelReaderApp:
             command=self._cache_sync_shutdown,
         ).pack(anchor="w", padx=12, pady=(2, 2))
 
-        # 操作按钮
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=(6, 10))
         self._cache_start_btn = tk.Button(ops, text="开始缓存", width=10, command=self._cache_start)
@@ -2643,16 +2943,17 @@ class NovelReaderApp:
         self._cache_resume_btn.pack(side="left")
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
 
-        # 初始默认全选当前书
         self._cache_select_all()
         win.protocol("WM_DELETE_WINDOW", win.destroy)
         win.after(300, self._cache_tick, win)
         self._cache_sync_state()
 
-    # ---------- 缓存窗口辅助 ----------
+    # ---------- 缓存窗口辅助（单书） ----------
     def _cache_selected(self):
-        """返回选中的章节索引集合；全选时返回 None（表示全部）。"""
-        n = len(self.book.chapters)
+        book = self._cache_mgr_target_book
+        if book is None:
+            return None
+        n = len(book.chapters)
         try:
             sel = set(map(int, self._cache_lb.curselection()))
         except Exception:
@@ -2669,7 +2970,6 @@ class NovelReaderApp:
         self._cache_lb.selection_clear(0, "end")
 
     def _cache_select_invert(self):
-        """反选：翻转当前章节选中状态。"""
         n = self._cache_lb.size()
         cur = set(self._cache_lb.curselection())
         self._cache_lb.selection_clear(0, "end")
@@ -2684,76 +2984,74 @@ class NovelReaderApp:
 
     def _cache_sync_shutdown(self):
         try:
-            self.tts.set_book_cache_auto_shutdown(self._cache_shutdown_var.get())
+            self.tts.set_book_cache_auto_shutdown(self._cache_shutdown_var.get(), self._cache_mgr_target_bid)
         except Exception:
             pass
 
     def _cache_start(self):
-        if not self.book:
+        book = self._cache_mgr_target_book
+        bid = self._cache_mgr_target_bid
+        if not book or not bid:
             return
         idx = self._cache_selected()
         if idx == set() or (idx is not None and len(idx) == 0):
-            messagebox.showinfo("提示", "请先选择至少一个要缓存的章节", parent=self._cache_dlg)
+            messagebox.showinfo("提示", "请先选择至少一个要缓存的章节", parent=self._cache_book_dlg)
             return
-        st = self.tts.start_book_cache(self.book, self.current_bid, idx)
+        st = self.tts.start_book_cache(book, bid, idx)
         if st is None:
             return
-        self._book_cache_base_size = self.storage.book_cache_size(self.current_bid)
         if st["state"] == "unsupported":
             messagebox.showinfo(
                 "提示",
-                "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n"
-                "请在「语音」下拉框选择一个 Edge 音色后再试。",
-                parent=self._cache_dlg,
+                "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n请在「语音」下拉框选择一个 Edge 音色后再试。",
+                parent=self._cache_book_dlg,
             )
             return
         if st["state"] == "unavailable":
-            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_dlg)
+            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
             return
         self._book_cache_done_flashed = False
         self._cache_sync_shutdown()
         self._cache_sync_state()
 
     def _cache_pause(self):
-        self.tts.pause_book_cache()
+        self.tts.pause_book_cache(self._cache_mgr_target_bid)
         self._cache_sync_state()
 
     def _cache_resume(self):
-        self.tts.resume_book_cache()
+        self.tts.resume_book_cache(self._cache_mgr_target_bid)
         self._cache_sync_state()
 
     def _cache_continue(self):
         """继续上次下载：若有暂停中的任务则恢复；否则从持久化进度精确续传。"""
+        bid = self._cache_mgr_target_bid
+        book = self._cache_mgr_target_book
+        if not bid or not book:
+            return
         try:
-            st = self.tts.book_cache_status()
+            st = self.tts.book_cache_status(bid)
         except Exception:
             st = None
         if st and st["state"] == "paused":
             self._cache_resume()
             self._cache_sync_state()
             return
-        # 无进行中任务：从持久化进度继续（progress.json 记录已完成任务索引）
-        if not self.book:
-            return
-        # 全选所有章节（resume 模式会自动跳过已完成的任务）
         self._cache_select_all()
-        st = self.tts.start_book_cache(self.book, self.current_bid, None, resume=True)
+        st = self.tts.start_book_cache(book, bid, None, resume=True)
         if st is None:
             return
-        self._book_cache_base_size = self.storage.book_cache_size(self.current_bid)
         if st.get("state") == "unsupported":
             messagebox.showinfo(
                 "提示",
-                "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n"
-                "请在「语音」下拉框选择一个 Edge 音色后再试。",
-                parent=self._cache_dlg,
+                "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n请在「语音」下拉框选择一个 Edge 音色后再试。",
+                parent=self._cache_book_dlg,
             )
             return
         if st.get("state") == "unavailable":
-            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_dlg)
+            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
             return
         if st.get("state") == "done":
-            messagebox.showinfo("提示", "所有章节均已缓存完成。", parent=self._cache_dlg)
+            messagebox.showinfo("提示", "所有章节均已缓存完成。", parent=self._cache_book_dlg)
             return
         self._book_cache_done_flashed = False
         self._cache_sync_shutdown()
@@ -2761,7 +3059,7 @@ class NovelReaderApp:
 
     def _cache_sync_state(self):
         try:
-            st = self.tts.book_cache_status()
+            st = self.tts.book_cache_status(self._cache_mgr_target_bid)
         except Exception:
             st = None
         state = st["state"] if st else None
@@ -2782,34 +3080,35 @@ class NovelReaderApp:
             self._cache_resume_btn.configure(state="disabled")
 
     def _cache_tick(self, win):
-        """缓存窗口周期刷新进度/容量/按钮状态。"""
+        """单书缓存窗口周期刷新进度/容量/按钮状态。"""
         try:
             if not win.winfo_exists():
                 return
         except Exception:
             return
         try:
-            st = self.tts.book_cache_status()
+            st = self.tts.book_cache_status(self._cache_mgr_target_bid)
         except Exception:
             st = None
         if st:
             state, done, total = st["state"], st["done"], st["total"]
-            if total:
+            if state == "building" or total == 0:
+                self._cache_bar.configure(value=0)
+                self._cache_prog.configure(text="正在准备缓存任务…")
+            else:
                 pct = done / total * 100
                 self._cache_bar.configure(value=pct)
-            else:
-                pct = 0
-            if state == "caching":
-                self._cache_prog.configure(text=f"正在缓存 {done}/{total}（{pct:.1f}%）…")
-            elif state == "paused":
-                self._cache_prog.configure(text=f"已暂停 {done}/{total}（{pct:.1f}%）")
-            elif state == "done":
-                self._cache_prog.configure(text=f"全部完成：共 {done}/{total} 句")
-            elif state == "cancelled":
-                self._cache_prog.configure(text="已取消")
-            else:
-                self._cache_prog.configure(text=f"已就绪（现有 {done}/{total} 句，可续传）")
-            disk = self.tts.book_cache_disk_used()
+                if state == "caching":
+                    self._cache_prog.configure(text=f"正在缓存 {done}/{total}（{pct:.1f}%）…")
+                elif state == "paused":
+                    self._cache_prog.configure(text=f"已暂停 {done}/{total}（{pct:.1f}%）")
+                elif state == "done":
+                    self._cache_prog.configure(text=f"全部完成：共 {done}/{total} 句")
+                elif state == "cancelled":
+                    self._cache_prog.configure(text="已取消")
+                else:
+                    self._cache_prog.configure(text=f"已就绪（现有 {done}/{total} 句，可续传）")
+            disk = self.tts.book_cache_disk_used(self._cache_mgr_target_bid)
             self._cache_disk.configure(text=f"缓存已占容量：{disk / 1048576:.1f} MB")
         else:
             self._cache_prog.configure(text="尚未开始")
@@ -2823,16 +3122,16 @@ class NovelReaderApp:
     def _on_status_cache_click(self, event=None):
         """点击右下角整本缓存状态：在 暂停/继续 之间切换下载。"""
         try:
-            st = self.tts.book_cache_status()
+            st = self.tts.book_cache_status(self.current_bid)
         except Exception:
             st = None
         if not st:
             return
         if st["state"] == "caching":
-            self.tts.pause_book_cache()
+            self.tts.pause_book_cache(self.current_bid)
             self._flash_status(f"已暂停整本缓存（{st['done']}/{st['total']}），点击状态可继续")
         elif st["state"] == "paused":
-            self.tts.resume_book_cache()
+            self.tts.resume_book_cache(self.current_bid)
             self._flash_status("已继续整本缓存下载")
 
     def _open_percent_dialog(self):
@@ -3163,8 +3462,8 @@ class NovelReaderApp:
     def _on_close(self):
         self.tts.stop()
         try:
-            # 关闭时自动暂停音频缓存：保留进度，下次可「继续上次下载」，避免无用功
-            self.tts.pause_book_cache()
+            # 关闭时自动暂停所有书的音频缓存：保留进度，下次可「继续上次下载」，避免无用功
+            self.tts.pause_all_book_cache()
         except Exception:
             pass
         # 关闭正在进行的批量导入

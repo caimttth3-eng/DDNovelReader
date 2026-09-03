@@ -147,7 +147,7 @@ class _EdgePrefetch:
             while not self._stopped.is_set():
                 with self._lock:
                     off = self._next_off
-                text, nxt = SpeechController._next_chunk(self._content, off)
+                text, nxt, _ = SpeechController._next_chunk(self._content, off)
                 if not text or nxt <= off:
                     break
                 with self._lock:
@@ -193,18 +193,22 @@ class WholeBookCacher:
     WORKERS = 3
     SAVE_INTERVAL = 50  # 每完成 N 个任务保存一次进度
 
-    def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None):
+    def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None,
+                 bump_cb=None, size_cb=None, flush_cb=None):
         self._book = book
         self._book_id = str(book_id or "book")
+        # 每本书一个顶层目录：<cache_root>/<book_id>/<语音>/<语速>/
         self._dir = os.path.join(
-            cache_root, _sanitize_name(voice), str(int(rate)), self._book_id
+            cache_root, self._book_id, _sanitize_name(voice), str(int(rate))
         )
         self._voice = voice
         self._rate = int(rate)
+        self._bump_cb = bump_cb   # 写文件后回调（大小索引增量）
+        self._size_cb = size_cb   # 查询该书已缓存大小（读索引）
+        self._flush_cb = flush_cb # 完成/暂停/取消时回调（大小索引落盘）
         self._chapter_indices = chapter_indices  # set[int] 或 None=全部
-        self._tasks = []  # [(ci, off, text)]
-        self._build_tasks()
-        self._total = len(self._tasks)
+        self._tasks = []  # [(ci, off, text)]，由后台线程构建
+        self._total = 0
         self._done = 0
         self._next = 0
         self._completed = set()  # 已完成任务索引（持久化）
@@ -212,11 +216,15 @@ class WholeBookCacher:
         self._cancelled = threading.Event()
         self._pause_evt = threading.Event()
         self._pause_evt.set()  # 默认运行
-        self._state = "idle"  # idle / caching / paused / done / cancelled
+        self._state = "idle"  # idle / building / caching / paused / done / cancelled
         self._auto_shutdown = False
         self._shutdown_posted = False
         self._last_save = 0
         self._bytes_written = 0  # 本轮实际写入的音频字节（持久化大小用）
+        self._build_ready = threading.Event()  # 任务列表构建完成信号
+        self._build_error = None
+        # 任务列表在后台线程构建：百万字长篇小说逐章切句耗时，不能阻塞 GUI 线程
+        threading.Thread(target=self._build_tasks_bg, daemon=True).start()
 
     def _progress_path(self):
         return os.path.join(self._dir, "progress.json")
@@ -268,6 +276,12 @@ class WholeBookCacher:
         except Exception:
             pass
 
+        if self._flush_cb is not None:
+            try:
+                self._flush_cb()
+            except Exception:
+                pass
+
     def _build_tasks(self):
         for ci, ch in enumerate(self._book.chapters):
             if self._chapter_indices is not None and ci not in self._chapter_indices:
@@ -276,26 +290,61 @@ class WholeBookCacher:
             # 文件仍按「原文偏移」命名，保证朗读时缓存可命中。
             clean_text, cmap = ch.tts_content()
             orig_len = len(ch.content)
+            # 一次性切分整章全部句子（O(n)），避免逐句调用 _next_chunk
+            # 导致的对剩余文本反复切片（O(n²)，百万字书会卡几十秒）。
+            # _next_chunk 的切分规则与 split_sentences 完全一致，结果可互相命中。
             clean_off = 0
-            while clean_off < len(clean_text):
-                text, nxt = SpeechController._next_chunk(clean_text, clean_off)
-                if not text or nxt <= clean_off:
-                    break
-                orig_off = clean_to_orig(cmap, clean_off, orig_len)
+            for text in split_sentences(clean_text):
+                if not text:
+                    continue
+                start = clean_text.find(text, clean_off)
+                if start < 0:
+                    start = clean_off
+                orig_off = clean_to_orig(cmap, start, orig_len)
                 self._tasks.append((ci, orig_off, text))
-                clean_off = nxt
+                clean_off = start + len(text)
+
+    def _build_tasks_bg(self):
+        """后台构建任务列表（逐章切句），完成后置 build_ready 信号。"""
+        try:
+            self._build_tasks()
+            with self._lock:
+                self._total = len(self._tasks)
+        except Exception as e:
+            with self._lock:
+                self._build_error = e
+        finally:
+            self._build_ready.set()
 
     def start(self, resume=False):
-        """开始缓存。resume=True 时从持久化进度继续（跳过已完成任务）。"""
-        if self._state == "caching":
-            return
-        if not self._tasks:
-            self._state = "done"
-            return
+        """开始缓存。立即返回（不阻塞 GUI），后台等待任务构建完成后再开跑。
+
+        resume=True 时从持久化进度继续（跳过已完成任务）。
+        """
+        with self._lock:
+            if self._state == "caching":
+                return
+            if self._state == "done":
+                return
+            self._state = "caching"
+            self._cancelled.clear()
+            self._pause_evt.set()
         os.makedirs(self._dir, exist_ok=True)
-        self._state = "caching"
-        self._cancelled.clear()
-        self._pause_evt.set()
+        threading.Thread(target=self._init_and_run, args=(resume,), daemon=True).start()
+
+    def _init_and_run(self, resume):
+        """在后台线程中：等待任务构建完成 → 初始化进度 → 启动工作线程。"""
+        self._build_ready.wait()
+        with self._lock:
+            if self._build_error is not None:
+                self._state = "cancelled"
+                return
+            total = self._total
+        if total == 0:
+            with self._lock:
+                self._state = "done"
+            self._save_progress("done")
+            return
 
         if resume:
             prog = self._load_progress()
@@ -306,12 +355,13 @@ class WholeBookCacher:
                     self._completed = completed
                     # 找到第一个未完成的任务索引
                     self._next = 0
-                    while self._next < self._total and self._next in self._completed:
+                    while self._next < total and self._next in self._completed:
                         self._next += 1
                 # 如果全部完成，直接标记 done
-                if self._next >= self._total:
-                    with self._lock:
+                with self._lock:
+                    if self._next >= total:
                         self._state = "done"
+                if self._next >= total:
                     self._save_progress("done")
                     return
             else:
@@ -330,9 +380,9 @@ class WholeBookCacher:
         self._spawn_workers()
 
     def _spawn_workers(self):
-        for _ in range(min(self.WORKERS, max(1, self._total - self._done))):
-            t = threading.Thread(target=self._worker, daemon=True)
-            t.start()
+        # 固定 WORKERS 个工作线程；任务不足时 worker 会自动退出
+        for _ in range(self.WORKERS):
+            threading.Thread(target=self._worker, daemon=True).start()
 
     def pause(self):
         self._pause_evt.clear()
@@ -361,16 +411,21 @@ class WholeBookCacher:
         self._auto_shutdown = bool(on)
 
     def _worker(self):
+        # 等待任务列表构建完成（构建失败则直接退出）
+        self._build_ready.wait()
+        with self._lock:
+            if self._build_error is not None:
+                return
         while True:
             if self._cancelled.is_set():
                 return
             if not self._pause_evt.wait(timeout=0.2):
                 return  # 暂停：退出，等待 resume 重新拉线程
             with self._lock:
+                if self._next >= len(self._tasks):
+                    break
                 idx = self._next
                 self._next += 1
-            if idx >= len(self._tasks):
-                break
             ci, off, text = self._tasks[idx]
             # 已在持久化进度中标记完成的任务直接跳过
             with self._lock:
@@ -440,6 +495,11 @@ class WholeBookCacher:
             os.replace(tmp, final)
             with self._lock:
                 self._bytes_written += len(audio)
+            if self._bump_cb is not None:
+                try:
+                    self._bump_cb(self._book_id, self._voice, self._rate, len(audio))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -447,7 +507,15 @@ class WholeBookCacher:
         return os.path.join(self._dir, f"{int(ci):04d}_{int(off):08d}.mp3")
 
     def disk_used(self):
-        """当前书籍缓存目录占用字节数（不含 progress.json）。"""
+        """当前书籍缓存目录占用字节数（不含 progress.json）。
+
+        优先读大小索引（不扫盘）；无索引回调时才退化为遍历目录。
+        """
+        if self._size_cb is not None:
+            try:
+                return int(self._size_cb(self._book_id) or 0)
+            except Exception:
+                pass
         total = 0
         try:
             for root, _, files in os.walk(self._dir):
@@ -490,7 +558,14 @@ class SpeechController:
         self._edge_prefetch = None
         self._edge_fail_posted = False
         self._tts_cache_dir = None
-        self._book_cacher = None
+        # 整本语音缓存：按 book_id 管理，每本书独立缓存器，互不阻塞（支持多书同时缓存）
+        self._book_cachers = {}
+        self._book_cachers_lock = threading.Lock()
+        # 音频缓存大小索引（避免反复遍历数万细碎 mp3 文件）
+        self._size_entries = None   # 懒加载：{key: {"size","t"}}
+        self._size_dirty = False
+        self._size_bumps = 0
+        self._size_lock = threading.RLock()  # 可重入：bump/load 嵌套 with 不锁死
 
     # ---------- 事件 ----------
     def _post(self, evt):
@@ -573,10 +648,20 @@ class SpeechController:
 
     # ---------- 整本语音缓存 ----------
     def set_tts_cache_dir(self, path):
+        self._tts_size_persist()  # 切换前把脏索引落盘到旧目录（转移时随目录带走）
         self._tts_cache_dir = path
+        with self._size_lock:
+            self._size_entries = None  # 目录切换后重新懒加载
+            self._size_dirty = False
 
     def set_book_id(self, book_id):
         self._book_id = str(book_id or "book")
+
+    def _cacher_for(self, book_id=None):
+        """按 book_id 取缓存器；未指定时用当前书 id。"""
+        bid = str(book_id or self._book_id or "book")
+        with self._book_cachers_lock:
+            return self._book_cachers.get(bid)
 
     def _cached_audio(self, ci, off):
         """按 (章节, 句偏移, 语音, 语速, 书籍) 查找整本缓存中的 MP3；未命中返回 None。"""
@@ -586,7 +671,7 @@ class SpeechController:
             voice = self._edge_voice
             rate = int(self._rate)
         bid = self._book_id or "book"
-        d = os.path.join(self._tts_cache_dir, _sanitize_name(voice), str(rate), bid)
+        d = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
         p = os.path.join(d, f"{int(ci):04d}_{int(off):08d}.mp3")
         try:
             if os.path.exists(p) and os.path.getsize(p) > 0:
@@ -597,21 +682,52 @@ class SpeechController:
         return None
 
     def start_book_cache(self, book, book_id, chapter_indices=None, resume=False):
-        """开启整本语音缓存（仅 Edge 后端），可按章节子集缓存。resume=True 从持久化进度继续。返回状态 dict。"""
+        """开启整本语音缓存（仅 Edge 后端），可按章节子集缓存。
+
+        多书独立：每本书一个缓存器（keyed by book_id），第一本书缓存进行中
+        也可以同时缓存第二本，互不干扰。resume=True 从持久化进度继续。
+        返回状态 dict。
+        """
         if self._backend != "edge":
             return {"state": "unsupported"}
         if not self._tts_cache_dir or not book or not book.chapters:
             return {"state": "unavailable"}
-        if self._book_cacher is not None and self._book_cacher.status()["state"] == "caching":
-            return self._book_cacher.status()  # 已在缓存中，幂等返回
+        bid = str(book_id or "book")
+        self._book_id = bid  # 同步当前书 id，保证后续查询/控制落在本书
         with self._cv:
             voice = self._edge_voice
             rate = int(self._rate)
-        self._book_cacher = WholeBookCacher(
-            book, book_id, self._tts_cache_dir, voice, rate, chapter_indices
-        )
-        self._book_cacher.start(resume=resume)
-        return self._book_cacher.status()
+        with self._book_cachers_lock:
+            cacher = self._book_cachers.get(bid)
+            if cacher is not None:
+                st = cacher.status()
+                # 同书正在缓存：幂等返回，不重复启动
+                if st["state"] == "caching":
+                    return st
+                same_sel = self._same_chapter_sel(cacher._chapter_indices, chapter_indices)
+                # 同书已暂停且要求续传且章节选择未变：直接恢复（保留内存进度）
+                if st["state"] == "paused" and resume and same_sel:
+                    return cacher.resume()
+                # 同书已完成且章节选择未变：幂等返回完成状态
+                if st["state"] == "done" and same_sel:
+                    return st
+                # 其余情况（章节选择变化 / 暂停后显式重来 / 取消后重来）：重建 cacher，
+                # 保证任务列表与本次选择一致（旧 done 任务列表会阻断新选择）
+            cacher = WholeBookCacher(
+                book, bid, self._tts_cache_dir, voice, rate, chapter_indices,
+                bump_cb=self._tts_size_bump, size_cb=self.tts_cache_size,
+                flush_cb=self._tts_size_persist,
+            )
+            self._book_cachers[bid] = cacher
+        cacher.start(resume=resume)
+        return cacher.status()
+
+    @staticmethod
+    def _same_chapter_sel(a, b):
+        """章节选择是否相同：None 表示全选，与全选集合等价。"""
+        a = a if a is None else set(a)
+        b = b if b is None else set(b)
+        return a == b
 
     def get_book_cache_progress(self, book, book_id):
         """返回持久化的缓存进度信息（用于显示续传位置），无进度返回 None。"""
@@ -622,6 +738,8 @@ class SpeechController:
             rate = int(self._rate)
         try:
             cacher = WholeBookCacher(book, book_id, self._tts_cache_dir, voice, rate, None)
+            # 等待任务构建完成再读进度，避免 total 未就绪导致的误判
+            cacher._build_ready.wait(timeout=60)
             prog = cacher._load_progress()
             if prog is None:
                 return None
@@ -630,35 +748,137 @@ class SpeechController:
         except Exception:
             return None
 
-    def pause_book_cache(self):
-        if self._book_cacher is not None:
-            return self._book_cacher.pause()
+    def pause_book_cache(self, book_id=None):
+        cacher = self._cacher_for(book_id)
+        if cacher is not None:
+            return cacher.pause()
         return None
 
-    def resume_book_cache(self):
-        if self._book_cacher is not None:
-            return self._book_cacher.resume()
+    def resume_book_cache(self, book_id=None):
+        cacher = self._cacher_for(book_id)
+        if cacher is not None:
+            return cacher.resume()
         return None
 
-    def cancel_book_cache(self):
-        if self._book_cacher is not None:
-            self._book_cacher.cancel()
-            return self._book_cacher.status()
+    def cancel_book_cache(self, book_id=None):
+        cacher = self._cacher_for(book_id)
+        if cacher is not None:
+            cacher.cancel()
+            return cacher.status()
         return None
 
-    def set_book_cache_auto_shutdown(self, on):
-        if self._book_cacher is not None:
-            self._book_cacher.set_auto_shutdown(bool(on))
+    def pause_all_book_cache(self):
+        """关闭程序时暂停所有正在进行的缓存，保留进度供下次续传。"""
+        with self._book_cachers_lock:
+            cachers = list(self._book_cachers.values())
+        for c in cachers:
+            try:
+                c.pause()
+            except Exception:
+                pass
+        self._tts_size_persist()
 
-    def book_cache_disk_used(self):
-        if self._book_cacher is not None:
-            return self._book_cacher.disk_used()
-        return 0
+    def set_book_cache_auto_shutdown(self, on, book_id=None):
+        cacher = self._cacher_for(book_id)
+        if cacher is not None:
+            cacher.set_auto_shutdown(bool(on))
 
-    def book_cache_status(self):
-        if self._book_cacher is None:
+    def book_cache_disk_used(self, book_id=None):
+        """当前书籍音频缓存占用字节数（读大小索引，不扫盘）。"""
+        return self.tts_cache_size(book_id)
+    # ---------- 音频缓存大小索引（避免反复遍历数万细碎 mp3） ----------
+    def _tts_size_load(self):
+        with self._size_lock:
+            if self._size_entries is None:
+                from .storage import load_tts_size_index
+                root = self._tts_cache_dir or ""
+                self._size_entries = load_tts_size_index(root)
+            return self._size_entries
+
+    def _tts_size_persist(self):
+        with self._size_lock:
+            if self._size_entries is not None and self._size_dirty:
+                from .storage import save_tts_size_index
+                save_tts_size_index(self._tts_cache_dir or "", self._size_entries)
+                self._size_dirty = False
+
+    def _tts_size_bump(self, bid, voice, rate, delta):
+        """缓存写文件成功后增量累加大小（每 50 次落盘一次）。"""
+        try:
+            with self._size_lock:
+                entries = self._tts_size_load()
+                key = f"{str(bid)}/{voice}/{int(rate)}"
+                e = entries.get(key) or {"size": 0, "t": time.time()}
+                e["size"] = int(e.get("size", 0)) + int(delta)
+                e["t"] = time.time()
+                entries[key] = e
+                self._size_dirty = True
+                self._size_bumps += 1
+                if self._size_bumps % 50 == 0:
+                    self._tts_size_persist()
+        except Exception:
+            pass
+
+    def tts_cache_size(self, book_id=None):
+        """返回音频缓存大小（字节）。
+
+        book_id 为空 = 全部书之和；给定 book_id = 该书所有语音/语速之和。
+        纯读索引，不扫盘；由启动时的后台校准 + 缓存中增量维护保证准确性。
+        """
+        try:
+            with self._size_lock:
+                entries = self._tts_size_load()
+                if book_id is not None:
+                    key = str(book_id) + "/"
+                    total = sum(
+                        int(e.get("size", 0))
+                        for k, e in entries.items()
+                        if k.startswith(key)
+                    )
+                else:
+                    total = sum(int(e.get("size", 0)) for e in entries.values())
+            return total
+        except Exception:
+            return 0
+
+    def tts_cache_calibrate(self, book_id=None):
+        """后台一次性校准音频缓存大小（扫盘）并写索引。
+
+        返回 {bid: size}。仅用于启动迁移后 / 切换缓存目录 / 转移缓存后，
+        正常使用中由增量维护保持准确，不重复扫盘。
+        """
+        try:
+            from .storage import calibrate_tts_size
+            result = calibrate_tts_size(self._tts_cache_dir or "", book_id)
+            with self._size_lock:
+                self._size_entries = None  # 强制下次懒加载新索引
+            return result
+        except Exception:
+            return {}
+
+    def tts_cache_invalidate(self, book_id=None):
+        """清除某本书（或全部）的音频缓存大小索引条目（删除/转移缓存后调用）。"""
+        try:
+            with self._size_lock:
+                entries = self._tts_size_load()
+                if book_id is not None:
+                    key = str(book_id) + "/"
+                    for k in [k for k in list(entries) if k.startswith(key)]:
+                        entries.pop(k, None)
+                else:
+                    entries.clear()
+                self._size_dirty = True
+                self._tts_size_persist()
+        except Exception:
+            pass
+
+    # ---------- 整本语音缓存 ----------
+
+    def book_cache_status(self, book_id=None):
+        cacher = self._cacher_for(book_id)
+        if cacher is None:
             return None
-        return self._book_cacher.status()
+        return cacher.status()
 
     def chapters_cached_status(self, book, book_id):
         """返回每章是否已完全缓存的 dict {chapter_idx: bool}。
@@ -671,7 +891,7 @@ class SpeechController:
             voice = self._edge_voice
             rate = int(self._rate)
         bid = str(book_id or "book")
-        d = os.path.join(self._tts_cache_dir, _sanitize_name(voice), str(rate), bid)
+        d = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
         result = {}
         for ci, ch in enumerate(book.chapters):
             try:
@@ -681,7 +901,7 @@ class SpeechController:
                 total = 0
                 cached = 0
                 while clean_off < len(clean_text):
-                    text, nxt = SpeechController._next_chunk(clean_text, clean_off)
+                    text, nxt, _ = SpeechController._next_chunk(clean_text, clean_off)
                     if not text or nxt <= clean_off:
                         break
                     orig_off = clean_to_orig(cmap, clean_off, orig_len)

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """v1.5 新功能专项测试：右键菜单 / 书架右键 / 全屏 / 快捷键 / 删除逻辑。"""
 import ctypes
 import os
@@ -98,7 +98,7 @@ def main():
     app.open_book(bid)
     root.update_idletasks()
 
-    check("版本号 v1.95", __version__ == "1.95", __version__)
+    check("版本号 >= 1.98", tuple(map(int, __version__.split("."))) >= (1, 98), __version__)
 
     # --- 阅读区右键：选中文字复制 ---
     app.text.configure(state="normal")
@@ -184,7 +184,7 @@ def main():
     check("进入全屏状态", app._fullscreen is True)
     check("工具条已隐藏", app._toolbar.winfo_manager() == "")
     def _shelf_in_paned(app):
-        return str(app._left) in [str(p) for p in app._outer_paned.panes()]
+        return str(app._left) in [str(p) for p in app._inner_paned.panes()]
     check("全屏时书架已隐藏", not _shelf_in_paned(app))
     check("悬浮条已作为顶部信息条显示", app._overlay.winfo_manager() == "grid")
 
@@ -446,7 +446,7 @@ def main():
             time.sleep(0.05)
         check("整本缓存完成", st["state"] == "done" and st["done"] == 4, str(st))
         # 缓存文件已落盘（路径含 book_id，避免不同书籍缓存互相覆盖）
-        _cd = os.path.join(tts_cache_dir(), "zh-CN-XiaoxiaoNeural", "200", cbid)
+        _cd = os.path.join(tts_cache_dir(), cbid, "zh-CN-XiaoxiaoNeural", "200")
         _n = len([f for f in os.listdir(_cd) if f.endswith(".mp3")]) if os.path.exists(_cd) else 0
         check("缓存文件落盘 4 个", _n == 4, f"n={_n}")
         # 命中
@@ -536,17 +536,31 @@ def main():
     app.tts._backend = "edge"
     app.tts._edge_voice = "zh-CN-XiaoxiaoNeural"
     app.tts.set_rate(200)
+    def _wait_cache_ready(expect_total=None, timeout=15):
+        """等待缓存任务构建完成（异步），返回状态 dict。"""
+        t0 = time.time()
+        st = None
+        while time.time() - t0 < timeout:
+            st = app.tts.book_cache_status(_sbid)
+            if st and st.get("total", 0) > 0:
+                if expect_total is None or st["total"] == expect_total:
+                    return st
+            time.sleep(0.05)
+        return st
+
     st = app.tts.start_book_cache(_sel_book, _sbid, {0})
-    check("缓存章节子集启动", st["state"] == "caching" and st["total"] == 5, str(st))
-    app.tts.pause_book_cache()
-    st = app.tts.book_cache_status()
+    check("缓存章节子集启动", st["state"] in ("caching", "done"), str(st))
+    st = _wait_cache_ready(5)
+    check("章节子集任务数=5", st is not None and st["total"] == 5, str(st))
+    app.tts.pause_book_cache(_sbid)
+    st = app.tts.book_cache_status(_sbid)
     check("缓存暂停", st["state"] == "paused", str(st))
-    app.tts.resume_book_cache()
-    st = app.tts.book_cache_status()
+    app.tts.resume_book_cache(_sbid)
+    st = app.tts.book_cache_status(_sbid)
     check("缓存继续", st["state"] == "caching", str(st))
     _dl = time.time() + 10
     while time.time() < _dl:
-        st = app.tts.book_cache_status()
+        st = app.tts.book_cache_status(_sbid)
         if st and st["state"] in ("done", "cancelled"):
             break
         time.sleep(0.05)
@@ -558,15 +572,16 @@ def main():
     app.tts.set_book_cache_auto_shutdown(True)  # 只验证设置器不抛错（不真正关机）
     check("自动关机设置器", True)
     st = app.tts.start_book_cache(_sel_book, _sbid, None)  # 全量，续传跳过已有
-    check("续传全量启动", st["total"] == 8, str(st))
+    st = _wait_cache_ready(8)
+    check("续传全量启动(total=8)", st is not None and st["total"] == 8, str(st))
     _dl = time.time() + 10
     while time.time() < _dl:
-        st = app.tts.book_cache_status()
+        st = app.tts.book_cache_status(_sbid)
         if st and st["state"] in ("done", "cancelled"):
             break
         time.sleep(0.05)
     check("续传全量完成", st["state"] == "done" and st["done"] == 8, str(st))
-    app.tts.set_book_cache_auto_shutdown(False)
+    app.tts.set_book_cache_auto_shutdown(False, _sbid)
 
     # 缓存管理窗口可打开
     app.open_book(cbid)  # 回到已入库书籍
@@ -577,7 +592,6 @@ def main():
         app._cache_dlg.destroy()
     except Exception:
         pass
-
     # --- v1.92：从该段开始朗读（显示行→原文偏移） ---
     _map_book = book_loader.BookContent("映射书", "", "txt", [
         book_loader.Chapter("第一章", "第一行第一段。\n第二行第二段。\n第三行第三段。"),
@@ -678,14 +692,14 @@ def main():
             break
         time.sleep(0.05)
     check("自定义目录缓存完成", st["state"] == "done", str(st))
-    _cf = os.path.join(_custom, "zh-CN-XiaoxiaoNeural", "200", _cc_bid)
+    _cf = os.path.join(_custom, _cc_bid, "zh-CN-XiaoxiaoNeural", "200")
     check("音频缓存落在自定义目录", os.path.isdir(_cf), _cf)
     _newdir = os.path.join(TMP, "audio_cache_moved")
     app._do_transfer_cache(app._effective_tts_cache_root(), _newdir, kind="audio")
     check("转移后设置更新", app.storage.get_setting("tts_cache_dir") == _newdir,
           str(app.storage.get_setting("tts_cache_dir")))
-    check("转移后文件在新目录", os.path.isdir(os.path.join(_newdir, "zh-CN-XiaoxiaoNeural", "200", _cc_bid)))
-    check("转移后旧目录清空", not os.path.isdir(os.path.join(_custom, "zh-CN-XiaoxiaoNeural")))
+    check("转移后文件在新目录", os.path.isdir(os.path.join(_newdir, _cc_bid, "zh-CN-XiaoxiaoNeural", "200")))
+    check("转移后旧目录清空", not os.path.isdir(os.path.join(_custom, _cc_bid)))
     check("音频缓存大小统计>0", app._audio_cache_size(_cc_bid) > 0, str(app._audio_cache_size(_cc_bid)))
     app._delete_audio_cache(_cc_bid)
     check("删除音频缓存后为0", app._audio_cache_size(_cc_bid) == 0, str(app._audio_cache_size(_cc_bid)))
@@ -694,13 +708,21 @@ def main():
     app.storage.set_setting("tts_cache_dir", _old_custom or "")
     app.tts.set_tts_cache_dir(app._effective_tts_cache_root())
 
-    # 3) 缓存窗口：按钮调整 + 警示说明
+    # 3) 缓存窗口：下载管理器（多书）+ 单书章节选择窗口
     app.open_book(cbid)
     app._open_cache_dialog()
     root.update_idletasks()
+    check("缓存窗口打开（多书）", getattr(app, "_cache_dlg", None) and app._cache_dlg.winfo_exists())
+    try:
+        app._cache_dlg.destroy()
+    except Exception:
+        pass
+    # 打开单书章节选择窗口（含反选 / 继续上次下载）
+    app._open_book_cache_dialog(cbid)
+    root.update_idletasks()
 
     def _find_btn(text, w=None):
-        w = w or app._cache_dlg
+        w = w or getattr(app, "_cache_book_dlg", None) or app._cache_dlg
         try:
             for c in w.winfo_children():
                 try:
@@ -715,7 +737,7 @@ def main():
         return False
 
     def _find_lbl(sub, w=None):
-        w = w or app._cache_dlg
+        w = w or getattr(app, "_cache_book_dlg", None) or app._cache_dlg
         try:
             for c in w.winfo_children():
                 try:
@@ -741,7 +763,10 @@ def main():
     check("反选后为空", len(app._cache_lb.curselection()) == 0)
     app._cache_select_invert()
     check("再反选恢复全选", len(app._cache_lb.curselection()) == _n_all)
-    app._cache_dlg.destroy()
+    try:
+        app._cache_book_dlg.destroy()
+    except Exception:
+        pass
 
     # 4) 书架显示缓存总大小
     app._refresh_bookshelf()
@@ -751,6 +776,7 @@ def main():
     # 5) 状态栏缓存点击（暂停/继续）
     _cc2 = book_loader.BookContent("点击书", "", "txt", [book_loader.Chapter("第一章", "子。丑。寅。卯。" * 300)])
     app.tts._backend = "edge"
+    app.current_bid = "clickbook"  # _on_status_cache_click 依赖当前打开书
     app.tts.start_book_cache(_cc2, "clickbook")
     st = app.tts.book_cache_status()
     if st and st["state"] == "caching":

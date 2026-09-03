@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """数据层：书架、阅读进度自动保存、全局设置、解析缓存。"""
 import hashlib
 import json
 import os
+import threading
 import time
 
 
@@ -77,20 +78,23 @@ def dir_size(path):
 
 
 def audio_cache_dirs(root, bid):
-    """返回某本书在 `root/<语音>/<语速>/<book_id>` 下的全部缓存目录列表。"""
+    """返回某本书在 `root/<book_id>/<语音>/<语速>` 下的全部缓存目录列表。
+
+    每本书一个顶层目录，内部再按语音/语速分子目录（参数指纹隔离）。
+    """
     out = []
+    bd = os.path.join(root, str(bid))
     try:
-        for voice in os.listdir(root):
-            vd = os.path.join(root, voice)
+        if not os.path.isdir(bd):
+            return out
+        for voice in os.listdir(bd):
+            vd = os.path.join(bd, voice)
             if not os.path.isdir(vd):
                 continue
             for rate in os.listdir(vd):
                 rd = os.path.join(vd, rate)
-                if not os.path.isdir(rd):
-                    continue
-                bd = os.path.join(rd, str(bid))
-                if os.path.isdir(bd):
-                    out.append(bd)
+                if os.path.isdir(rd):
+                    out.append(rd)
     except Exception:
         pass
     return out
@@ -244,3 +248,159 @@ class Storage:
             os.replace(tmp, p)
         except Exception:
             pass
+
+
+# ============================================================
+# 音频缓存大小索引（避免反复遍历数万细碎小文件）
+# ============================================================
+# 索引文件存放在缓存根目录 <root>/.tts_sizes.json，结构：
+#   {"v": 1, "entries": {"<bid>/<语音>/<语速>": {"size": 字节, "t": 时间戳}}}
+# 缓存进行中增量更新；三处（书架/关于页/整本缓存窗口）统一读索引，不扫盘。
+TTS_SIZE_INDEX = ".tts_sizes.json"
+_tts_size_lock = threading.Lock()
+
+
+def tts_size_index_path(root):
+    return os.path.join(root, TTS_SIZE_INDEX)
+
+
+def load_tts_size_index(root):
+    """读索引 entries dict；损坏/缺失返回 {}。"""
+    try:
+        p = tts_size_index_path(root)
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("v") == 1:
+                entries = data.get("entries")
+                if isinstance(entries, dict):
+                    return entries
+    except Exception:
+        pass
+    return {}
+
+
+def save_tts_size_index(root, entries):
+    """原子写索引文件。"""
+    try:
+        os.makedirs(root, exist_ok=True)
+        p = tts_size_index_path(root)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"v": 1, "entries": entries}, f, ensure_ascii=False)
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
+
+def tts_size_key(bid, voice, rate):
+    return f"{str(bid)}/{voice}/{int(rate)}"
+
+
+def migrate_old_tts_layout(root):
+    """一次性迁移旧结构 `root/<语音>/<语速>/<book_id>/` → 新结构 `root/<book_id>/<语音>/<语速>/`。
+
+    在后台线程调用。返回迁移了多少个目录。
+    """
+    moved = 0
+    try:
+        if not os.path.isdir(root):
+            return 0
+        for voice in os.listdir(root):
+            vd = os.path.join(root, voice)
+            if not os.path.isdir(vd) or voice.startswith("."):
+                continue
+            for rate in os.listdir(vd):
+                rd = os.path.join(vd, rate)
+                if not os.path.isdir(rd) or rate.startswith("."):
+                    continue
+                for bid in os.listdir(rd):
+                    src = os.path.join(rd, bid)
+                    if not os.path.isdir(src):
+                        continue
+                    dst = os.path.join(root, bid, voice, rate)
+                    try:
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        # 目标已存在时仅补齐缺失文件（合并，不覆盖同名）
+                        if os.path.isdir(dst):
+                            for f in os.listdir(src):
+                                s = os.path.join(src, f)
+                                d = os.path.join(dst, f)
+                                if os.path.isfile(s) and not os.path.exists(d):
+                                    import shutil
+                                    shutil.move(s, d)
+                            # 源目录清空后删除
+                            if not os.listdir(src):
+                                os.rmdir(src)
+                        else:
+                            os.renames(src, dst)
+                        moved += 1
+                    except Exception:
+                        pass
+                    # 逐级清理空目录
+                    try:
+                        if os.path.isdir(rd) and not os.listdir(rd):
+                            os.rmdir(rd)
+                    except Exception:
+                        pass
+                try:
+                    if os.path.isdir(vd) and not os.listdir(vd):
+                        os.rmdir(vd)
+                except Exception:
+                    pass
+            try:
+                if os.path.isdir(root) and os.path.isdir(os.path.join(root, voice)) and not os.listdir(os.path.join(root, voice)):
+                    os.rmdir(os.path.join(root, voice))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return moved
+
+
+def calibrate_tts_size(root, bid=None):
+    """对指定书（或全部）目录重新统计音频缓存大小并写入索引。
+
+    全量校准：清空旧条目后按 `bid/语音/语速` 细粒度逐个目录 dir_size 重建，
+    之后增量 bump 在此基数上累加，不会双重计数。
+    返回 {bid: size}。只在索引缺失/迁移后一次性后台调用。
+    """
+    try:
+        with _tts_size_lock:
+            entries = load_tts_size_index(root)
+            entries.clear()
+            result = {}
+            if bid is not None:
+                bids = [str(bid)]
+            else:
+                bids = []
+                try:
+                    if os.path.isdir(root):
+                        bids = [b for b in os.listdir(root)
+                                if os.path.isdir(os.path.join(root, b)) and not b.startswith(".")]
+                except Exception:
+                    pass
+            for b in bids:
+                total = 0
+                bd = os.path.join(root, str(b))
+                try:
+                    if os.path.isdir(bd):
+                        for voice in os.listdir(bd):
+                            vd = os.path.join(bd, voice)
+                            if not os.path.isdir(vd) or voice.startswith("."):
+                                continue
+                            for rate in os.listdir(vd):
+                                rd = os.path.join(vd, rate)
+                                if os.path.isdir(rd):
+                                    sz = dir_size(rd)
+                                    entries[tts_size_key(b, voice, rate)] = {
+                                        "size": sz, "t": time.time()
+                                    }
+                                    total += sz
+                except Exception:
+                    pass
+                result[b] = total
+            save_tts_size_index(root, entries)
+            return result
+    except Exception:
+        return {}
