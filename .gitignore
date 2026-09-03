@@ -56,3 +56,9 @@ downloads/
 
 # 测试样书（大文件不进仓库）
 /sample/*.pdf
+
+# 备份文件
+*.bak
+# 根目录临时截图
+/_tb_*.png
+

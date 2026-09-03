@@ -192,6 +192,40 @@ class Storage:
         b["last_read_at"] = time.time()
         self.save()
 
+    # ---------- 书签（划线高亮 + 备注笔记） ----------
+    def get_bookmarks(self, bid):
+        """返回某本书的书签列表（按创建时间正序）。"""
+        b = self.data["books"].get(bid)
+        if not b:
+            return []
+        bms = b.get("bookmarks")
+        if not isinstance(bms, list):
+            return []
+        return [x for x in bms if isinstance(x, dict)]
+
+    def add_bookmark(self, bid, bm):
+        """新增书签；bm 为 dict（chapter_idx/offset/offset_end/text/note）。返回 id。"""
+        b = self.data["books"].get(bid)
+        if not b:
+            return None
+        bms = b.setdefault("bookmarks", [])
+        bm["id"] = str(time.time_ns())
+        bm.setdefault("created_at", time.time())
+        bms.append(bm)
+        self.save()
+        return bm["id"]
+
+    def remove_bookmark(self, bid, bm_id):
+        """按 id 删除书签。"""
+        b = self.data["books"].get(bid)
+        if not b:
+            return
+        bms = b.get("bookmarks")
+        if not isinstance(bms, list):
+            return
+        b["bookmarks"] = [x for x in bms if x.get("id") != bm_id]
+        self.save()
+
     # ---------- 缓存大小持久化（避免每次刷新书架遍历文件系统） ----------
     def book_cache_size(self, bid):
         """读取持久化的书籍总缓存大小（字节），不扫描文件系统。"""
