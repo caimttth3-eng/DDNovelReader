@@ -857,7 +857,11 @@ class SpeechController:
             return {}
 
     def tts_cache_invalidate(self, book_id=None):
-        """清除某本书（或全部）的音频缓存大小索引条目（删除/转移缓存后调用）。"""
+        """清除某本书（或全部）的音频缓存大小索引条目（删除/转移缓存后调用）。
+
+        条目清空后直接删除索引文件本身（连同 .tmp），避免残留几百字节的
+        .tts_sizes.json 配置文件。
+        """
         try:
             with self._size_lock:
                 entries = self._tts_size_load()
@@ -867,8 +871,22 @@ class SpeechController:
                         entries.pop(k, None)
                 else:
                     entries.clear()
-                self._size_dirty = True
-                self._tts_size_persist()
+                if not entries:
+                    # 索引已空：删除索引文件本身，目录保持干净，不写空索引
+                    from .storage import tts_size_index_path
+                    root = self._tts_cache_dir or ""
+                    for p in (tts_size_index_path(root),
+                              tts_size_index_path(root) + ".tmp"):
+                        try:
+                            if os.path.exists(p):
+                                os.remove(p)
+                        except Exception:
+                            pass
+                    self._size_entries = {}  # 内存置空，避免下次 load 读到旧数据
+                    self._size_dirty = False
+                else:
+                    self._size_dirty = True
+                    self._tts_size_persist()
         except Exception:
             pass
 

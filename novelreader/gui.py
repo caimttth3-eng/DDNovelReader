@@ -337,13 +337,18 @@ class NovelReaderApp:
     def _migrate_tts_cache_bg(self):
         """启动后台一次性任务：迁移旧音频缓存目录结构 + 校准大小索引。
 
-        旧结构 `tts_cache/<语音>/<语速>/<book_id>/` → 新结构 `tts_cache/<book_id>/<语音>/<语速>/`，
-        完成后对全部书校准一次大小索引（此后缓存中增量维护，不再反复扫盘）。
+        旧结构 `tts_cache/<语音>/<语速>/<book_id>/` → 新结构 `tts_cache/<book_id>/<语音>/<语速>/`。
+
+        仅当大小索引文件（.tts_sizes.json）不存在时才执行迁移 + 校准；索引文件已存在
+        说明结构与索引均已就位（缓存中由增量 bump / invalidate 维护），直接跳过，
+        避免每次启动遍历数万细碎 mp3 造成硬盘持续读取。
         """
         def worker():
             try:
-                from .storage import migrate_old_tts_layout
+                from .storage import tts_size_index_path, migrate_old_tts_layout
                 root = self._effective_tts_cache_root()
+                if os.path.isfile(tts_size_index_path(root)):
+                    return  # 索引已就位，无需迁移 / 校准
                 moved = migrate_old_tts_layout(root)
                 if moved:
                     self.root.after(0, lambda: self._flash_status(
@@ -2546,6 +2551,8 @@ class NovelReaderApp:
         n = 0
         try:
             for name in os.listdir(root):
+                if name.startswith(".tts_sizes"):
+                    continue  # 索引文件由 invalidate 统一处理（条目清空后删除）
                 p = os.path.join(root, name)
                 try:
                     if os.path.isdir(p):
