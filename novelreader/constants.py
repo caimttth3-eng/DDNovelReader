@@ -1,6 +1,41 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """模块级常量与通用工具（从 gui.py 拆分，供各 Mixin 与基类共用，避免循环导入）。"""
 import ctypes
+import tkinter as tk
+
+# 统一滚动条样式（全软件一致：扁平黑色滑块 + 浅灰轨道）
+SCROLL_WIDTH = 35
+SCROLL_THUMB = "#000000"      # 浅色主题滑块
+SCROLL_TROUGH = "#d8d8d8"     # 浅色主题轨道
+SCROLL_DARK_THUMB = "#1f1f1f"  # 夜间主题滑块（近黑，保证在深色轨道上可见）
+SCROLL_DARK_TROUGH = "#4a4a4a"  # 夜间主题轨道
+
+
+def make_scrollbar(parent, command, orient="vertical", dark=False):
+    """创建全软件统一样式的滚动条（与阅读区进度条同款扁平黑色滑块）。
+
+    参数与 tk.Scrollbar 一致；dark=True 时使用夜间主题配色。
+    """
+    thumb = SCROLL_DARK_THUMB if dark else SCROLL_THUMB
+    trough = SCROLL_DARK_TROUGH if dark else SCROLL_TROUGH
+    sb = tk.Scrollbar(
+        parent, orient=orient, command=command,
+        highlightthickness=0, borderwidth=0, width=SCROLL_WIDTH, relief="flat",
+        bg=thumb, activebackground=thumb, troughcolor=trough,
+    )
+    return sb
+
+
+def style_scrollbar(sb, dark=False):
+    """按主题（重新）设置统一滚动条配色。"""
+    thumb = SCROLL_DARK_THUMB if dark else SCROLL_THUMB
+    trough = SCROLL_DARK_TROUGH if dark else SCROLL_TROUGH
+    try:
+        sb.configure(bg=thumb, activebackground=thumb, troughcolor=trough)
+    except Exception:
+        pass
+    return sb
+
 
 THEMES = {
     "白天": {"bg": "#FFFFFF", "fg": "#222222", "hl": "#FFE28A"},

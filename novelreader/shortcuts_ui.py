@@ -133,11 +133,15 @@ class ShortcutsMixin:
         self.root.attributes("-fullscreen", True)
         self._toolbar.grid_remove()
         self._shelf_was_visible = getattr(self, '_shelf_visible', False)
+        self._chapter_was_visible = getattr(self, '_chapter_panel_visible', False)
         try:
             pane_paths = [str(p) for p in self._inner_paned.panes()]
             if str(self._left) in pane_paths:
                 self._inner_paned.remove(self._left)
                 self._shelf_visible = False
+            if str(self.chapter_panel) in pane_paths:
+                self._inner_paned.remove(self.chapter_panel)
+                self._chapter_panel_visible = False
         except Exception:
             pass
         self._overlay.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -149,14 +153,18 @@ class ShortcutsMixin:
         self.root.attributes("-fullscreen", False)
         self._overlay.grid_remove()
         self._toolbar.grid()
-        if getattr(self, '_shelf_was_visible', False):
-            try:
-                pane_paths = [str(p) for p in self._inner_paned.panes()]
+        try:
+            pane_paths = [str(p) for p in self._inner_paned.panes()]
+            if getattr(self, '_shelf_was_visible', False):
                 if str(self._left) not in pane_paths:
                     self._inner_paned.insert(0, self._left, weight=0)
                     self._shelf_visible = True
-            except Exception:
-                pass
+            if getattr(self, '_chapter_was_visible', False):
+                if str(self.chapter_panel) not in pane_paths:
+                    self._inner_paned.add(self.chapter_panel, weight=0)
+                    self._chapter_panel_visible = True
+        except Exception:
+            pass
     def _tick_overlay(self):
         try:
             if self._fullscreen:

@@ -822,10 +822,9 @@ class NovelReaderBase:
         self._apply_scrollbar_theme(theme)
         self._apply_font()
     def _make_scrollbar(self, parent, command, orient="vertical"):
-        sb = tk.Scrollbar(
-            parent, orient=orient, command=command,
-            highlightthickness=0, borderwidth=0, width=14, relief="flat",
-        )
+        from .constants import make_scrollbar as _ms
+        dark = (self.settings.get("page_theme", "白天") == "夜间")
+        sb = _ms(parent, command, orient=orient, dark=dark)
         self._scrollbars.append(sb)
         return sb
     def _apply_scrollbar_theme(self, theme):

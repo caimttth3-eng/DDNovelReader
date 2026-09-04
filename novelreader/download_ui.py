@@ -24,6 +24,7 @@ from .storage import (
 )
 from .tts_engine import SpeechController
 from .constants import (
+    make_scrollbar,
     THEMES,
     UI_THEMES,
     FILE_TYPES,
@@ -80,7 +81,7 @@ class DownloadMixin:
         tree.column("status", width=90, anchor="center")
         tree.column("progress", width=230, anchor="center")
         tree.column("size", width=110, anchor="center")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        sb = make_scrollbar(frame, tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -95,8 +96,10 @@ class DownloadMixin:
 
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=6)
-        tk.Button(ops, text="开始/继续", width=10, command=self._cache_mgr_start).pack(side="left")
-        tk.Button(ops, text="暂停", width=7, command=self._cache_mgr_pause).pack(side="left", padx=4)
+        self._cache_mgr_play_btn = tk.Button(ops, text="▶ 开始/继续", width=12, command=self._cache_mgr_start)
+        self._cache_mgr_play_btn.pack(side="left")
+        self._cache_mgr_stop_btn = tk.Button(ops, text="停止", width=8, command=self._cache_mgr_stop, state="disabled")
+        self._cache_mgr_stop_btn.pack(side="left", padx=4)
         tk.Button(ops, text="章节选择…", width=10, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
         tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
@@ -199,6 +202,7 @@ class DownloadMixin:
                 vals, tag = self._cache_mgr_row_values(bid, meta)
                 tree.item(bid, values=vals, tags=(tag,))
             self._cache_mgr_update_status()
+            self._cache_mgr_update_ops_btn()
         except Exception:
             pass
         try:
@@ -258,6 +262,46 @@ class DownloadMixin:
     def _cache_mgr_all_pause(self):
         for bid in list(self.storage.all_books().keys()):
             self.tts.pause_book_cache(bid)
+    def _cache_mgr_stop(self):
+        """停止选中书的缓存任务（终止线程，已缓存文件保留，进度保存可续传）。"""
+        for bid in self._cache_mgr_selected_bids():
+            self.tts.cancel_book_cache(bid)
+    def _cache_mgr_is_paused(self, bid):
+        try:
+            st = self.tts.book_cache_status(bid)
+            return bool(st and st["state"] == "paused")
+        except Exception:
+            return False
+    def _cache_mgr_is_done(self, bid):
+        try:
+            st = self.tts.book_cache_status(bid)
+            return bool(st and st["state"] == "done")
+        except Exception:
+            return False
+    def _cache_mgr_update_ops_btn(self):
+        """智能播放键 + 停止键状态刷新（自动检测选中任务状态）。"""
+        try:
+            bids = self._cache_mgr_selected_bids()
+            play = self._cache_mgr_play_btn
+            stop = self._cache_mgr_stop_btn
+            if not bids:
+                play.configure(text="▶ 开始/继续", command=self._cache_mgr_start, state="disabled")
+                stop.configure(state="disabled")
+                return
+            has_active = any(self._is_caching(b) for b in bids)
+            has_paused = any(self._cache_mgr_is_paused(b) for b in bids)
+            all_done = all(self._cache_mgr_is_done(b) for b in bids)
+            if has_active:
+                play.configure(text="⏸ 暂停", command=self._cache_mgr_pause, state="normal")
+            else:
+                play.configure(text="▶ 开始/继续", command=self._cache_mgr_start, state="normal")
+            if all_done:
+                play.configure(text="✔ 已完成", command=None, state="disabled")
+                stop.configure(state="disabled")
+            else:
+                stop.configure(state="normal" if (has_active or has_paused) else "disabled")
+        except Exception:
+            pass
     def _cache_mgr_delete_audio(self):
         bids = self._cache_mgr_selected_bids()
         if not bids:
@@ -346,7 +390,7 @@ class DownloadMixin:
         sel_frame = tk.Frame(win)
         sel_frame.pack(fill="both", expand=True, padx=12)
         lb = tk.Listbox(sel_frame, selectmode="extended", activestyle="dotbox", font=("微软雅黑", 9))
-        sb = tk.Scrollbar(sel_frame, orient="vertical", command=lb.yview)
+        sb = make_scrollbar(sel_frame, lb.yview)
         lb.configure(yscrollcommand=sb.set)
         lb.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -372,14 +416,10 @@ class DownloadMixin:
 
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=(6, 10))
-        self._cache_start_btn = tk.Button(ops, text="开始缓存", width=10, command=self._cache_start)
-        self._cache_start_btn.pack(side="left")
-        self._cache_continue_btn = tk.Button(ops, text="继续上次下载", width=12, command=self._cache_continue)
-        self._cache_continue_btn.pack(side="left", padx=6)
-        self._cache_pause_btn = tk.Button(ops, text="暂停", width=8, command=self._cache_pause, state="disabled")
-        self._cache_pause_btn.pack(side="left", padx=6)
-        self._cache_resume_btn = tk.Button(ops, text="继续", width=8, command=self._cache_resume, state="disabled")
-        self._cache_resume_btn.pack(side="left")
+        self._cache_play_btn = tk.Button(ops, text="▶ 开始缓存", width=14, command=self._cache_start)
+        self._cache_play_btn.pack(side="left")
+        self._cache_stop_btn = tk.Button(ops, text="停止", width=8, command=self._cache_stop, state="disabled")
+        self._cache_stop_btn.pack(side="left", padx=6)
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
 
         self._cache_select_all()
@@ -450,6 +490,10 @@ class DownloadMixin:
     def _cache_resume(self):
         self.tts.resume_book_cache(self._cache_mgr_target_bid)
         self._cache_sync_state()
+    def _cache_stop(self):
+        """停止缓存（终止任务线程，已缓存文件保留，进度保存可下次续传）。"""
+        self.tts.cancel_book_cache(self._cache_mgr_target_bid)
+        self._cache_sync_state()
     def _cache_continue(self):
         """继续上次下载：若有暂停中的任务则恢复；否则从持久化进度精确续传。"""
         bid = self._cache_mgr_target_bid
@@ -485,26 +529,28 @@ class DownloadMixin:
         self._cache_sync_shutdown()
         self._cache_sync_state()
     def _cache_sync_state(self):
+        """智能播放键 + 停止键：自动检测缓存状态切换 开始 / 暂停 / 继续。"""
         try:
             st = self.tts.book_cache_status(self._cache_mgr_target_bid)
         except Exception:
             st = None
         state = st["state"] if st else None
-        if state == "caching":
-            self._cache_start_btn.configure(state="disabled")
-            self._cache_continue_btn.configure(state="disabled")
-            self._cache_pause_btn.configure(state="normal")
-            self._cache_resume_btn.configure(state="disabled")
+        play = getattr(self, "_cache_play_btn", None)
+        stop = getattr(self, "_cache_stop_btn", None)
+        if play is None or stop is None:
+            return
+        if state in ("caching", "building"):
+            play.configure(text="⏸ 暂停", command=self._cache_pause, state="normal")
+            stop.configure(state="normal")
         elif state == "paused":
-            self._cache_start_btn.configure(state="disabled")
-            self._cache_continue_btn.configure(state="normal")
-            self._cache_pause_btn.configure(state="disabled")
-            self._cache_resume_btn.configure(state="normal")
+            play.configure(text="▶ 继续", command=self._cache_continue, state="normal")
+            stop.configure(state="normal")
+        elif state == "done":
+            play.configure(text="✔ 已完成", command=None, state="disabled")
+            stop.configure(state="disabled")
         else:
-            self._cache_start_btn.configure(state="normal")
-            self._cache_continue_btn.configure(state="normal")
-            self._cache_pause_btn.configure(state="disabled")
-            self._cache_resume_btn.configure(state="disabled")
+            play.configure(text="▶ 开始缓存", command=self._cache_start, state="normal")
+            stop.configure(state="disabled")
     def _cache_tick(self, win):
         """单书缓存窗口周期刷新进度/容量/按钮状态。"""
         try:

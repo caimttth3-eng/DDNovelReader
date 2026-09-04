@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """弹窗：关于 / 皮肤选择 / 邮箱复制 / 定时停止 / 百分比跳转（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -24,6 +24,7 @@ from .storage import (
 )
 from .tts_engine import SpeechController
 from .constants import (
+    make_scrollbar,
     THEMES,
     UI_THEMES,
     FILE_TYPES,
@@ -95,7 +96,7 @@ class DialogMixin:
         nb.add(tab_cache, text="缓存管理")
 
         txt = tk.Text(tab_update, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
-        tsb = tk.Scrollbar(tab_update, command=txt.yview)
+        tsb = make_scrollbar(tab_update, txt.yview)
         txt.configure(yscrollcommand=tsb.set)
         tsb.pack(side="right", fill="y")
         txt.pack(side="left", fill="both", expand=True)
@@ -103,7 +104,7 @@ class DialogMixin:
         txt.configure(state="disabled")
 
         keys = tk.Text(tab_keys, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
-        ksb = tk.Scrollbar(tab_keys, command=keys.yview)
+        ksb = make_scrollbar(tab_keys, keys.yview)
         keys.configure(yscrollcommand=ksb.set)
         ksb.pack(side="right", fill="y")
         keys.pack(side="left", fill="both", expand=True)
@@ -114,7 +115,7 @@ class DialogMixin:
         # —— 缓存管理（可滚动卡片式布局） ——
         tab_cache.configure(bg=_about_bg)
         cache_canvas = tk.Canvas(tab_cache, bg=_about_bg, highlightthickness=0, bd=0)
-        cache_scroll = ttk.Scrollbar(tab_cache, orient="vertical", command=cache_canvas.yview)
+        cache_scroll = make_scrollbar(tab_cache, cache_canvas.yview)
         cache_inner = tk.Frame(cache_canvas, bg=_about_bg)
         cache_inner.bind("<Configure>", lambda e: cache_canvas.configure(scrollregion=cache_canvas.bbox("all")))
         cache_canvas.create_window((0, 0), window=cache_inner, anchor="nw")

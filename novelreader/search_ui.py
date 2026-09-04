@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """全文搜索：书内关键词搜索 + 结果列表 + 点击跳转（独立 Mixin，不写入 gui.py）。"""
 import tkinter as tk
 from tkinter import messagebox, ttk
+from .constants import make_scrollbar
 
 
 class SearchMixin:
@@ -36,7 +37,7 @@ class SearchMixin:
         list_frame = tk.Frame(dlg)
         list_frame.pack(fill="both", expand=True, padx=14, pady=(0, 10))
         lb = tk.Listbox(list_frame, font=("微软雅黑", 10), exportselection=False)
-        sb = ttk.Scrollbar(list_frame, command=lb.yview)
+        sb = make_scrollbar(list_frame, lb.yview)
         lb.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         lb.pack(side="left", fill="both", expand=True)

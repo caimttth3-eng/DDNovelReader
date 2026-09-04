@@ -352,7 +352,20 @@ class WholeBookCacher:
                 done, completed = prog
                 with self._lock:
                     self._done = done
-                    self._completed = completed
+                    self._completed = set(completed)
+                # 校验 completed：标记完成但实际文件缺失的任务剔除（断网/失败误标，允许补齐）
+                if self._completed:
+                    bad = []
+                    for idx in list(self._completed):
+                        ci, off, _text = self._tasks[idx]
+                        if not self._file_exists(ci, off):
+                            bad.append(idx)
+                    for idx in bad:
+                        with self._lock:
+                            self._completed.discard(idx)
+                            if self._done > 0:
+                                self._done -= 1
+                with self._lock:
                     # 找到第一个未完成的任务索引
                     self._next = 0
                     while self._next < total and self._next in self._completed:
@@ -441,21 +454,27 @@ class WholeBookCacher:
                 continue
             try:
                 audio = synth_audio(text, self._voice, self._rate)
-                if audio:
-                    self._write(ci, off, audio)
+                if not audio:
+                    continue  # 合成失败/空：不标记完成，留待续传重试
+                self._write(ci, off, audio)
             except Exception:
-                pass
+                continue  # 网络/合成失败：不标记完成，留待续传重试（避免 progress 谎报完成）
             with self._lock:
                 self._completed.add(idx)
                 self._done += 1
             self._maybe_save()
-        # 检查是否全部完成
+        # 检查是否全部完成（多 worker 竞态：任一 worker 收尾时已全部完成则无条件置 done）
         with self._lock:
             all_done = self._done >= self._total
-            if all_done and self._state == "caching" and not self._cancelled.is_set():
+        if all_done and not self._cancelled.is_set():
+            with self._lock:
                 self._state = "done"
-        if all_done:
             self._save_progress("done")
+        elif self._state in ("caching", "building") and not self._cancelled.is_set():
+            # 有任务因合成失败未完成：转暂停，进度保留，可续传补齐
+            with self._lock:
+                self._state = "paused"
+            self._save_progress("paused")
         if (
             self._state == "done"
             and self._auto_shutdown
@@ -566,6 +585,12 @@ class SpeechController:
         self._size_dirty = False
         self._size_bumps = 0
         self._size_lock = threading.RLock()  # 可重入：bump/load 嵌套 with 不锁死
+        # 整本缓存「完成态」文件数校验：后台单线程逐本执行（主线程只读集合，绝不扫描磁盘）
+        self._hist_done_checked = set()
+        self._hist_done_downgraded = set()
+        self._hist_check_lock = threading.Lock()
+        self._hist_check_queue = []
+        self._hist_check_worker = None
 
     # ---------- 事件 ----------
     def _post(self, evt):
@@ -908,6 +933,7 @@ class SpeechController:
         bid = str(book_id or self._book_id or "book")
         root = os.path.join(self._tts_cache_dir or "", bid)
         best = None
+        best_dir = None
         try:
             if os.path.isdir(root):
                 for v in os.listdir(root):
@@ -924,6 +950,7 @@ class SpeechController:
                             if (best is None
                                     or (d.get("updated_at") or 0) > (best.get("updated_at") or 0)):
                                 best = d
+                                best_dir = os.path.join(vd, r)
                         except Exception:
                             pass
         except Exception:
@@ -934,6 +961,18 @@ class SpeechController:
         st = best.get("state", "paused")
         if st in ("caching", "building", "idle"):
             st = "paused"
+        if st == "done":
+            # 完成态校验完全在后台单线程执行；主线程只读结果集合，绝不扫描磁盘
+            if best_dir in self._hist_done_downgraded:
+                st = "paused"  # 后台已确认文件不足 → 降级可续传
+            elif best_dir not in self._hist_done_checked:
+                # 首次遇到：标记已计划校验 + 入队后台校验，本次保守返回 paused（允许用户点继续触发补齐）
+                with self._hist_check_lock:
+                    if best_dir not in self._hist_done_checked:
+                        self._hist_done_checked.add(best_dir)
+                        self._hist_check_queue.append(best_dir)
+                        self._ensure_hist_check_worker()
+                st = "paused"
         return {
             "state": st,
             "done": int(best.get("done", 0)),
@@ -941,6 +980,39 @@ class SpeechController:
             "bytes_written": 0,
             "history": True,
         }
+
+    def _ensure_hist_check_worker(self):
+        """确保完成态校验后台线程在跑（单线程逐本校验，串行不拉满硬盘）。"""
+        if self._hist_check_worker is not None and self._hist_check_worker.is_alive():
+            return
+        self._hist_check_worker = threading.Thread(target=self._hist_check_loop, daemon=True)
+        self._hist_check_worker.start()
+
+    def _hist_check_loop(self):
+        """后台单线程：逐本统计 mp3 文件数，与 progress.done 对比，不足则记入降级集合。"""
+        while True:
+            with self._hist_check_lock:
+                if not self._hist_check_queue:
+                    return
+                best_dir = self._hist_check_queue.pop(0)
+            try:
+                if not os.path.isdir(best_dir):
+                    continue
+                nfiles = sum(1 for f in os.listdir(best_dir) if f.endswith(".mp3"))
+                # 读该目录 progress.json 的 done 作对比
+                pp = os.path.join(best_dir, "progress.json")
+                done = 0
+                if os.path.isfile(pp):
+                    try:
+                        with open(pp, "r", encoding="utf-8") as f:
+                            done = int(json.load(f).get("done", 0) or 0)
+                    except Exception:
+                        done = 0
+                if done and nfiles < done * 0.98:
+                    with self._hist_check_lock:
+                        self._hist_done_downgraded.add(best_dir)
+            except Exception:
+                pass
 
     def chapters_cached_status(self, book, book_id):
         """返回每章是否已完全缓存的 dict {chapter_idx: bool}。
