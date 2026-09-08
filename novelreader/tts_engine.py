@@ -194,7 +194,7 @@ class WholeBookCacher:
     SAVE_INTERVAL = 50  # 每完成 N 个任务保存一次进度
 
     def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None,
-                 bump_cb=None, size_cb=None, flush_cb=None):
+                 bump_cb=None, size_cb=None, flush_cb=None, preset_tasks=None):
         self._book = book
         self._book_id = str(book_id or "book")
         # 每本书一个顶层目录：<cache_root>/<book_id>/<语音>/<语速>/
@@ -223,8 +223,15 @@ class WholeBookCacher:
         self._bytes_written = 0  # 本轮实际写入的音频字节（持久化大小用）
         self._build_ready = threading.Event()  # 任务列表构建完成信号
         self._build_error = None
-        # 任务列表在后台线程构建：百万字长篇小说逐章切句耗时，不能阻塞 GUI 线程
-        threading.Thread(target=self._build_tasks_bg, daemon=True).start()
+        if preset_tasks is not None:
+            # 验证补全模式：直接使用预置的缺失任务列表，不重新构建
+            with self._lock:
+                self._tasks = list(preset_tasks)
+                self._total = len(self._tasks)
+            self._build_ready.set()
+        else:
+            # 任务列表在后台线程构建：百万字长篇小说逐章切句耗时，不能阻塞 GUI 线程
+            threading.Thread(target=self._build_tasks_bg, daemon=True).start()
 
     def _progress_path(self):
         return os.path.join(self._dir, "progress.json")
@@ -755,7 +762,15 @@ class SpeechController:
         return a == b
 
     def get_book_cache_progress(self, book, book_id):
-        """返回持久化的缓存进度信息（用于显示续传位置），无进度返回 None。"""
+        """返回缓存进度（优先读活跃 cacher 真实状态，无活跃任务时回退持久化进度）。"""
+        bid = str(book_id or "")
+        # 优先：当前有活跃 cacher（正在缓存/暂停/完成），直接读真实状态
+        active = self._book_cachers.get(bid)
+        if active is not None:
+            st = active.status()
+            return {"done": st.get("done", 0), "total": st.get("total", 0),
+                    "state": st.get("state", "paused")}
+        # 回退：读 progress.json（已暂停的历史任务）
         if not self._tts_cache_dir or not book:
             return None
         with self._cv:
@@ -763,7 +778,6 @@ class SpeechController:
             rate = int(self._rate)
         try:
             cacher = WholeBookCacher(book, book_id, self._tts_cache_dir, voice, rate, None)
-            # 等待任务构建完成再读进度，避免 total 未就绪导致的误判
             cacher._build_ready.wait(timeout=60)
             prog = cacher._load_progress()
             if prog is None:
@@ -772,6 +786,82 @@ class SpeechController:
             return {"done": done, "total": cacher._total, "state": "paused"}
         except Exception:
             return None
+
+    def verify_book_cache(self, book, book_id):
+        """验证整本语音缓存完整性：按当前分章/语音/语速重建任务列表，
+        扫描磁盘 mp3，返回缺失任务明细（供补全按钮使用）。
+
+        返回 dict: {total, missing_count, missing(list[(ci,off,text)]),
+                    chapters{ci:缺数}, complete, dir}，异常时含 error。
+        """
+        if not self._tts_cache_dir or not book or not book.chapters:
+            return {"error": "unavailable"}
+        bid = str(book_id or "book")
+        with self._cv:
+            voice = self._edge_voice
+            rate = int(self._rate)
+        root = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
+        # 与 WholeBookCacher._build_tasks 完全一致的任务构建（同一套切分/偏移规则）
+        tasks = []
+        for ci, ch in enumerate(book.chapters):
+            clean_text, cmap = ch.tts_content()
+            orig_len = len(ch.content)
+            clean_off = 0
+            for text in split_sentences(clean_text):
+                if not text:
+                    continue
+                start = clean_text.find(text, clean_off)
+                if start < 0:
+                    start = clean_off
+                orig_off = clean_to_orig(cmap, start, orig_len)
+                tasks.append((ci, orig_off, text))
+                clean_off = start + len(text)
+        missing = []
+        ch_counts = {}
+        for ci, off, text in tasks:
+            try:
+                p = os.path.join(root, "%04d_%08d.mp3" % (int(ci), int(off)))
+                if os.path.isfile(p) and os.path.getsize(p) > 0:
+                    continue
+            except Exception:
+                pass
+            missing.append((ci, off, text))
+            ch_counts[ci] = ch_counts.get(ci, 0) + 1
+        return {
+            "total": len(tasks),
+            "missing_count": len(missing),
+            "missing": missing,
+            "chapters": ch_counts,
+            "complete": not missing,
+            "dir": root,
+        }
+
+    def fill_missing_cache(self, book, book_id, missing_tasks):
+        """只缓存验证发现的缺失任务（补全模式），不重新下载已缓存部分。
+
+        使用 preset_tasks 让缓存器直接处理缺失任务列表。返回状态 dict。
+        """
+        if self._backend != "edge":
+            return {"state": "unsupported"}
+        if not self._tts_cache_dir or not book or not book.chapters or not missing_tasks:
+            return {"state": "unavailable"}
+        bid = str(book_id or "book")
+        self._book_id = bid
+        with self._cv:
+            voice = self._edge_voice
+            rate = int(self._rate)
+        with self._book_cachers_lock:
+            cacher = self._book_cachers.get(bid)
+            if cacher is not None and cacher.status()["state"] in ("caching", "building"):
+                return cacher.status()  # 补全任务已在跑，幂等返回
+            cacher = WholeBookCacher(
+                book, bid, self._tts_cache_dir, voice, rate,
+                bump_cb=self._tts_size_bump, size_cb=self.tts_cache_size,
+                flush_cb=self._tts_size_persist, preset_tasks=missing_tasks,
+            )
+            self._book_cachers[bid] = cacher
+        cacher.start(resume=False)
+        return cacher.status()
 
     def pause_book_cache(self, book_id=None):
         cacher = self._cacher_for(book_id)
@@ -931,6 +1021,17 @@ class SpeechController:
         无任何历史进度时返回 None。
         """
         bid = str(book_id or self._book_id or "book")
+        # 优先：当前有活跃 cacher（正在缓存/暂停/刚完成），直接返回真实状态，不读 progress.json
+        active = self._book_cachers.get(bid)
+        if active is not None:
+            st = active.status()
+            return {
+                "state": st.get("state", "paused"),
+                "done": int(st.get("done", 0)),
+                "total": int(st.get("total", 0)),
+                "bytes_written": int(st.get("bytes_written", 0)),
+                "history": False,
+            }
         root = os.path.join(self._tts_cache_dir or "", bid)
         best = None
         best_dir = None

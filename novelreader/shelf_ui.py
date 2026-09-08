@@ -140,7 +140,16 @@ class ShelfMixin:
             multi = False
         # 多选时：打开书籍、复制原文件、复制书名 变灰
         self.shelf_menu.entryconfigure("打开书籍", state="disabled" if multi else "normal")
-        self.shelf_menu.entryconfigure("复制原文件", state="disabled" if multi else "normal")
+        # 单选时：复制原文件 仅当源文件（原路径/备份源）可用，否则置灰
+        src_ok = False
+        if not multi:
+            sbid = sel[0] if sel else None
+            smeta = self.storage.get_book(sbid) if sbid else None
+            if smeta:
+                sp = smeta.get("path", "")
+                sbak = smeta.get("source_bak", "")
+                src_ok = (sp and os.path.exists(sp)) or (sbak and os.path.exists(sbak))
+        self.shelf_menu.entryconfigure("复制原文件", state="disabled" if (multi or not src_ok) else "normal")
         self.shelf_menu.entryconfigure("复制书名", state="disabled" if multi else "normal")
         try:
             self.shelf_menu.tk_popup(event.x_root, event.y_root)
@@ -155,8 +164,13 @@ class ShelfMixin:
             return
         path = meta.get("path", "")
         if not path or not os.path.exists(path):
-            messagebox.showinfo("提示", "原文件不存在或已被移动。")
-            return
+            # 原文件被删/移动 → 回退到软件缓存的源文件备份
+            bak = meta.get("source_bak", "")
+            if bak and os.path.exists(bak):
+                path = bak
+            else:
+                messagebox.showinfo("提示", "原文件不存在或已被移动。")
+                return
         if _copy_files_to_clipboard([path]):
             messagebox.showinfo("已复制", "原文件已复制到剪贴板，可在文件管理器中直接粘贴（Ctrl+V）。")
         else:

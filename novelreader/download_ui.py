@@ -101,6 +101,7 @@ class DownloadMixin:
         self._cache_mgr_stop_btn = tk.Button(ops, text="停止", width=8, command=self._cache_mgr_stop, state="disabled")
         self._cache_mgr_stop_btn.pack(side="left", padx=4)
         tk.Button(ops, text="章节选择…", width=10, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
+        tk.Button(ops, text="验证补全", width=9, command=self._cache_mgr_verify).pack(side="left", padx=4)
         tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
 
@@ -302,6 +303,113 @@ class DownloadMixin:
                 stop.configure(state="normal" if (has_active or has_paused) else "disabled")
         except Exception:
             pass
+    def _cache_mgr_verify(self):
+        """验证选中书的整本语音缓存：重建任务列表，扫描磁盘，报告缺失并支持一键补全。"""
+        bids = self._cache_mgr_selected_bids()
+        if not bids:
+            messagebox.showinfo("提示", "请先在列表中选择至少一本书", parent=self._cache_dlg)
+            return
+        wait = tk.Toplevel(self.root)
+        wait.title("验证中")
+        wait.transient(self.root)
+        wait.attributes("-topmost", True)
+        self._center_window(wait)
+        tk.Label(wait, text="正在验证缓存完整性，请稍候…\n（百万字书需数秒）",
+                 font=("微软雅黑", 10), padx=30, pady=20).pack()
+        wait.update()
+
+        def worker():
+            results = []
+            for bid in bids:
+                try:
+                    meta = self.storage.get_book(bid) or {}
+                    if bid == self.current_bid and self.book is not None:
+                        book = self.book
+                    elif bid in self._cache:
+                        book = self._cache[bid]
+                    else:
+                        book = self._load_book(meta.get("path", ""))
+                    r = self.tts.verify_book_cache(book, bid)
+                    results.append((bid, meta, r))
+                except Exception as e:
+                    results.append((bid, {}, {"error": str(e)}))
+            self.root.after(0, lambda: self._cache_mgr_verify_done(wait, results))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _cache_mgr_verify_done(self, wait, results):
+        try:
+            wait.destroy()
+        except Exception:
+            pass
+        win = tk.Toplevel(self.root)
+        win.title("缓存验证结果")
+        win.geometry("660x500")
+        win.minsize(580, 360)
+        win.transient(self.root)
+        self._center_window(win)
+        tk.Label(win, text="整本语音缓存验证结果（按当前分章 / 音色 / 语速重建任务列表，与磁盘逐句比对）",
+                 fg="#555555", font=("微软雅黑", 9), anchor="w", wraplength=620).pack(fill="x", padx=12, pady=(8, 2))
+        frm = tk.Frame(win)
+        frm.pack(fill="both", expand=True, padx=12, pady=4)
+        for bid, meta, r in results:
+            title = meta.get("title") or os.path.basename(meta.get("path", ""))
+            card = tk.Frame(frm, bd=1, relief="groove")
+            card.pack(fill="x", pady=4)
+            if "error" in r:
+                tk.Label(card, text="《%s》 验证失败：%s" % (title, r["error"]), fg="#b00020",
+                         font=("微软雅黑", 9), anchor="w", wraplength=600).pack(padx=8, pady=4)
+                continue
+            total = r.get("total", 0)
+            miss = r.get("missing_count", 0)
+            if r.get("complete"):
+                tk.Label(card, text="《%s》 ✔ 完整：%d 句全部存在，无缺失。" % (title, total),
+                         fg="#1a7a3a", font=("微软雅黑", 10), anchor="w").pack(padx=8, pady=(6, 6))
+            else:
+                chs = sorted((r.get("chapters") or {}).items())
+                ch_txt = "、".join("第%d章" % (c + 1) for c, _ in chs[:12])
+                if len(chs) > 12:
+                    ch_txt += " 等 %d 章" % len(chs)
+                tk.Label(card, text="《%s》 共 %d 句，缺失 %d 句（分布在 %d 章）：%s"
+                         % (title, total, miss, len(chs), ch_txt),
+                         fg="#b00020", font=("微软雅黑", 10), anchor="w", wraplength=580).pack(padx=8, pady=(6, 2))
+                tk.Button(card, text="立即补全缺失", width=14,
+                          command=lambda bid=bid, r=r, w=win: self._cache_mgr_fill(bid, r, w)
+                          ).pack(anchor="w", padx=8, pady=(0, 6))
+        tk.Button(win, text="关闭", width=10, command=win.destroy).pack(pady=8)
+
+    def _cache_mgr_fill(self, bid, r, result_win=None):
+        """对验证结果中的缺失任务启动补全下载（只下载缺失句子）。启动后关闭验证结果窗。"""
+        missing = r.get("missing") or []
+        if not missing:
+            messagebox.showinfo("提示", "没有需要补全的任务", parent=result_win or self.root)
+            return
+
+        def worker():
+            try:
+                meta = self.storage.get_book(bid) or {}
+                if bid == self.current_bid and self.book is not None:
+                    book = self.book
+                elif bid in self._cache:
+                    book = self._cache[bid]
+                else:
+                    book = self._load_book(meta.get("path", ""))
+                self.tts.fill_missing_cache(book, bid, missing)
+            except Exception as e:
+                self.root.after(0, lambda e=e: messagebox.showinfo("提示", "补全失败：%s" % e, parent=self.root))
+
+        threading.Thread(target=worker, daemon=True).start()
+        try:
+            if result_win is not None:
+                result_win.destroy()
+        except Exception:
+            pass
+        messagebox.showinfo("提示", "补全任务已启动（仅下载缺失句），可在下载管理器中查看进度。", parent=self.root)
+        try:
+            self._cache_mgr_refresh_rows()
+        except Exception:
+            pass
+
     def _cache_mgr_delete_audio(self):
         bids = self._cache_mgr_selected_bids()
         if not bids:
