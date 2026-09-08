@@ -203,7 +203,7 @@ def _strip_outer_resid(body):
     return _OUTER_RESID.sub("", body)
 
 
-# 正文开头残留的裸"第X章 ：标题"（作者把章节名重复写在正文第一行，如"第8章 ：女孩们的家庭　　正文"）
+# 正文开头残留的裸"第X章 ：标题"（作者把章节名重复写在正文第一行，如"第8章 ：标题　　正文"）
 _INLINE_TITLE_RESID = re.compile(r"^第" + _NUM + r"章\s*[：:]\s*[^\n]*?\u3000{2,}")
 
 
@@ -222,7 +222,7 @@ def _strip_inline_title_resid(body):
     return "\n".join(lines).strip("\n")
 
 
-# 正文开头的"第X章 章节名"（作者把章节名重复写在正文第一行），支持"第8章 ：女孩们的家庭"样式
+# 正文开头的"第X章 章节名"（作者把章节名重复写在正文第一行），支持"第8章 ：标题"样式
 _INLINE_TITLE_FULL = re.compile(
     r"^第(\d+)章[\s\u3000]*[：:]?[\s\u3000]*([^\n]{1,40}?)(?=\u3000{2,}|\s{2,}|\n|$)"
 )
