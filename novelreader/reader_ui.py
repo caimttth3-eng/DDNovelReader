@@ -37,6 +37,11 @@ from .constants import (
 class ReaderMixin:
     """阅读区：书籍加载 / 章节渲染 / 进度 / 滚动 / 高亮跟随 / 分页 / 定时保存"""
     def _load_book(self, path, force_reparse=False):
+        """加载书籍：内存缓存 → 磁盘缓存(版本匹配) → 源文件(原路径/备份源) → 旧缓存(静默兜底)。
+
+        源文件/备份缺失时直接继续用缓存阅读，不打断用户；
+        依赖源文件的功能（如书架“复制原文件”）在各自入口提示。
+        """
         bid = self.storage.book_id(path)
         if not force_reparse:
             if bid in self._cache:
@@ -44,15 +49,55 @@ class ReaderMixin:
             cached = self.storage.read_cache(bid)
             if cached:
                 # 缓存版本校验：旧版本缓存可能是坏数据（如段落换行丢失），
-                # 版本不符时强制重新解析，避免“从该段朗读/高亮跟随”等依赖段落的功能失效
+                # 版本不符时优先重新解析；解析失败才回退旧缓存
                 if int(cached.get("v", 0)) == book_loader.CONTENT_CACHE_VERSION:
                     content = book_loader.BookContent.from_dict(cached)
                     self._cache[bid] = content
                     return content
-        content = book_loader.parse_book(path)
-        self.storage.write_cache(bid, content)
-        self._cache[bid] = content
-        return content
+        # 源文件：原路径不存在时回退到缓存目录里的备份源
+        src = self._resolve_source_path(bid, path)
+        if src:
+            try:
+                content = book_loader.parse_book(src)
+                self.storage.write_cache(bid, content)
+                self._cache[bid] = content
+                return content
+            except Exception:
+                pass
+        # 源文件与备份都不可用：静默继续用任意版本缓存（不弹窗，功能不可用处单独提示）
+        cached = self.storage.read_cache(bid, any_version=True)
+        if cached:
+            try:
+                content = book_loader.BookContent.from_dict(cached)
+                self._cache[bid] = content
+                return content
+            except Exception:
+                pass
+        return None
+
+    def _resolve_source_path(self, bid, orig_path):
+        """确定可用的源文件路径：原路径优先，其次备份源。"""
+        if orig_path and os.path.exists(orig_path):
+            return orig_path
+        meta = self.storage.get_book(bid) or {}
+        bak = meta.get("source_bak", "")
+        if bak and os.path.exists(bak):
+            return bak
+        return None
+
+    def _ensure_source_backup(self, bid, meta):
+        """老书迁移：原文件还在且无备份时，自动复制一份到缓存目录。"""
+        try:
+            if meta.get("source_bak") and os.path.exists(meta["source_bak"]):
+                return
+            path = meta.get("path", "")
+            if path and os.path.exists(path):
+                bak = self.storage.backup_source(bid, path)
+                if bak:
+                    meta["source_bak"] = bak
+                    self.storage.save()
+        except Exception:
+            pass
     def open_book(self, bid):
         meta = self.storage.get_book(bid)
         if not meta:
@@ -60,20 +105,17 @@ class ReaderMixin:
         self.tts.stop()
         self.current_bid = bid
         self.tts.set_book_id(bid)
-        try:
-            self.book = self._load_book(meta["path"])
-        except Exception:
-            cached = self.storage.read_cache(bid)
-            if cached:
-                self.book = book_loader.BookContent.from_dict(cached)
-            else:
-                # 打开失败不弹模态框（避免启动/切书时卡死主线程），状态栏提示并进入空状态
-                try:
-                    self._flash_status(f"无法读取书籍文件：{os.path.basename(meta['path'])}")
-                except Exception:
-                    pass
-                self._render_empty()
-                return
+        self.book = self._load_book(meta.get("path", ""))
+        if self.book is None:
+            # 打开失败：状态栏提示并进入空状态
+            try:
+                self._flash_status(f"无法读取书籍文件：{os.path.basename(meta.get('path', ''))}")
+            except Exception:
+                pass
+            self._render_empty()
+            return
+        # 老书迁移：原文件还在且无备份 → 自动复制备份
+        self._ensure_source_backup(bid, meta)
         prog = meta.get("progress") or {}
         self.chapter_idx = max(0, min(int(prog.get("chapter_idx", 0)), len(self.book.chapters) - 1))
         self.char_offset = int(prog.get("char_offset", 0))

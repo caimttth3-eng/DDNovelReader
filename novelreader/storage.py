@@ -256,7 +256,7 @@ class Storage:
         root = resolve_cache_dir(custom)
         return os.path.join(root, f"{bid}.json")
 
-    def read_cache(self, bid):
+    def read_cache(self, bid, any_version=False):
         from .book_loader import CONTENT_CACHE_VERSION
 
         p = self.cache_path(bid)
@@ -265,7 +265,7 @@ class Storage:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if data.get("v") != CONTENT_CACHE_VERSION:
+            if not any_version and data.get("v") != CONTENT_CACHE_VERSION:
                 return None  # 缓存格式过期，触发重新解析
             return data
         except Exception:
@@ -280,6 +280,44 @@ class Storage:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(content.to_dict(), f, ensure_ascii=False)
             os.replace(tmp, p)
+        except Exception:
+            pass
+
+    # ---------- 书籍源文件备份（原文件被删除后仍可重解析/复制原文件） ----------
+    def sources_dir(self):
+        custom = self.data.get("settings", {}).get("cache_dir", "")
+        root = resolve_cache_dir(custom)
+        return os.path.join(root, "sources")
+
+    def backup_source_path(self, bid, ext):
+        ext = (ext or ".txt").lower()
+        return os.path.join(self.sources_dir(), "%s%s" % (bid, ext))
+
+    def backup_source(self, bid, src_path):
+        """把源文件复制到 <cache_dir>/sources/<bid><ext>，返回备份路径；失败返回 None。"""
+        import shutil
+        try:
+            ext = os.path.splitext(src_path)[1]
+            dst = self.backup_source_path(bid, ext)
+            if os.path.abspath(src_path) == os.path.abspath(dst):
+                return dst
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src_path, dst)
+            return dst
+        except Exception:
+            return None
+
+    def remove_source_backup(self, bid):
+        """删除该书在 sources/ 下的全部备份文件（<bid>.*）。"""
+        import glob
+        try:
+            d = self.sources_dir()
+            if os.path.isdir(d):
+                for f in glob.glob(os.path.join(d, bid + ".*")):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
         except Exception:
             pass
 

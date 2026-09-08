@@ -8,18 +8,18 @@ _UNIT = r"[章节回卷部集篇]"
 # 严格匹配：行首就是第N章 / Chapter N / 楔子等
 _HEAD_LINE = re.compile(
     r"^\s{0,4}(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—]?.*)?"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—]?.*)?"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
     r")\s*$"
 )
 
 # 宽松匹配：行尾是第N章（可能带书名前缀），用于匹配"书名 第1章"格式
 _TAIL_CHAPTER = re.compile(
     r"(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—]?.*)?"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—]?.*)?"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
     r")\s*$"
 )
 
@@ -32,7 +32,7 @@ _NON_TITLE_MARKERS = ("http", "来源", "作者", "简介", "目录", "更新", 
 # ---------- 内层章节标题：正文中穿插的"第X章 章节名"（带章节名，前面是句尾标点/省略号/双全角空格/行首） ----------
 # 很多网站书是"外层大段(书名 第N章) + 内层真章节(第N章 章节名)"结构，内层才是真正章节。
 _INNER_NUM_RE = re.compile(rf"第({_NUM})章")
-_INNER_NAME_RE = re.compile(r"[ \t\u3000]+([^\s。，；：…,.!;:]{2,24})")
+_INNER_NAME_RE = re.compile(r"(?=[ \t\u3000：:])[ \t\u3000]*[：:]?[ \t\u3000]*([^\s，。；…,.!;:]{2,30})")
 # 前置：行首 / 双全角空格 / 句尾标点或省略号或右引号（允许 "……" 场景）
 _INNER_PRE = re.compile(r"(?:[\n。！？；…”’!?;】》〕）]|\.{2,})$")
 
@@ -155,7 +155,9 @@ def _detect_inner_heads(lines):
     """检测正文中穿插的'第X章 章节名'（内层真章节）。
 
     返回 [(abs_offset, title, num_int_or_None), ...]。
-    条件：前置=行首/句尾标点/省略号(..)/双全角空格；后接 2-20 字章节名。
+    策略：收集所有"第X章 章节名"样式（允许标题嵌在正文行中间、前置为上一章正文，
+    允许分隔 '：/: 等），不做前置标点限制——是否采用内层分章由
+    _inner_continuous 的编号连续性与数量占比决定，避免普通书正文引用误判。
     """
     offsets = [0]
     for ln in lines[:-1]:
@@ -164,22 +166,17 @@ def _detect_inner_heads(lines):
     for i, line in enumerate(lines):
         line = line.strip("\r")
         for m in _INNER_NUM_RE.finditer(line):
-            seg = line[:m.start()]
-            # 前置：行首 / 双全角空格 / 句尾标点或省略号
-            if seg != "":
-                if not (seg.endswith("\u3000\u3000") or _INNER_PRE.search(seg[-4:])):
-                    continue
-            # 后接章节名
             after = line[m.end():]
             m2 = _INNER_NAME_RE.match(after)
             if not m2:
                 continue
             name = m2.group(1)
+            if len(name) > 30:
+                continue
             title = "第" + m.group(1) + "章 " + name
             off = offsets[i] + m.start()
             heads.append((off, title, _parse_ord(m.group(1))))
     return heads
-
 
 def _inner_continuous(heads):
     """内层标题编号是否从 1 连续（允许少量缺失）。"""
@@ -206,6 +203,51 @@ def _strip_outer_resid(body):
     return _OUTER_RESID.sub("", body)
 
 
+# 正文开头残留的裸"第X章 ：标题"（作者把章节名重复写在正文第一行，如"第8章 ：女孩们的家庭　　正文"）
+_INLINE_TITLE_RESID = re.compile(r"^第" + _NUM + r"章\s*[：:]\s*[^\n]*?\u3000{2,}")
+
+
+def _strip_inline_title_resid(body):
+    """清理章节正文开头行首残留的裸'第X章 ：标题'，只保留正文。"""
+    lines = body.split("\n")
+    hit = False
+    for i in range(min(2, len(lines))):
+        m = _INLINE_TITLE_RESID.match(lines[i])
+        if m:
+            rest = lines[i][m.end():]
+            lines[i] = rest.strip(" \t\u3000")
+            hit = True
+    if not hit:
+        return body
+    return "\n".join(lines).strip("\n")
+
+
+# 正文开头的"第X章 章节名"（作者把章节名重复写在正文第一行），支持"第8章 ：女孩们的家庭"样式
+_INLINE_TITLE_FULL = re.compile(
+    r"^第(\d+)章[\s\u3000]*[：:]?[\s\u3000]*([^\n]{1,40}?)(?=\u3000{2,}|\s{2,}|\n|$)"
+)
+
+
+def _absorb_inline_title(title, body):
+    """识别正文开头行首的'第N章 章节名'：编号匹配 → 用带章节名的标题替换该章标题并清理该行；
+    编号不匹配（如作者'二合一'错位）→ 仅清理该行标题文字，标题保持不变。"""
+    m = re.match(r"第(\d+)章", title)
+    num = int(m.group(1)) if m else None
+    lines = body.split("\n")
+    for i in range(min(2, len(lines))):
+        mm = _INLINE_TITLE_FULL.match(lines[i])
+        if not mm:
+            continue
+        inum = int(mm.group(1))
+        name = mm.group(2).strip(" \t\u3000")
+        rest = lines[i][mm.end():].strip(" \t\u3000")
+        lines[i] = rest
+        if num is not None and inum == num and name:
+            title = "第%d章 %s" % (num, name)
+        break
+    return title, "\n".join(lines).strip("\n")
+
+
 def _split_by_inner(text, heads):
     """按字符偏移切分（内层标题）。返回 [(title, body), ...]。"""
     heads = sorted(heads, key=lambda h: h[0])
@@ -217,6 +259,7 @@ def _split_by_inner(text, heads):
         start = off + len(title)
         end = heads[k + 1][0] if k + 1 < len(heads) else len(text)
         body = _strip_outer_resid(text[start:end]).strip("\n")
+        title, body = _absorb_inline_title(title, body)
         if body.strip():
             chapters.append((title, body))
     return chapters
@@ -256,6 +299,7 @@ def split_chapters(text):
             start += 1
         end = heads[k + 1][0] if k + 1 < len(heads) else len(lines)
         body = "\n".join(lines[start:end]).strip("\n")
+        title, body = _absorb_inline_title(title, body)
         if body.strip():
             chapters.append((title, body))
 

@@ -307,6 +307,13 @@ class ImportMixin:
             "chapter_titles": [c.title for c in content.chapters],
             "progress": {"chapter_idx": 0, "char_offset": 0, "percent": 0.0},
         }
+        # 备份源文件到缓存目录：原文件被删除/移动后仍可重解析、复制原文件
+        try:
+            bak = self.storage.backup_source(bid, path)
+            if bak:
+                meta["source_bak"] = bak
+        except Exception:
+            pass
         self.storage.add_book(meta)
         self.storage.write_cache(bid, content)
         self._cache[bid] = content
@@ -438,6 +445,11 @@ class ImportMixin:
                     os.remove(cp)
                 except Exception:
                     pass
+            # 删除源文件备份（原文件不删，只删软件自带的副本）
+            try:
+                self.storage.remove_source_backup(bid)
+            except Exception:
+                pass
             # 同步删除该书音频缓存（整本语音缓存）
             self._delete_audio_cache(bid)
         if self.current_bid == bid:
