@@ -22,6 +22,7 @@ import re
 import tempfile
 import threading
 import time
+import sys
 
 try:
     import pyttsx3
@@ -1464,7 +1465,7 @@ class SpeechController:
         return self._speak_sapi(text, gen)
 
     def _speak_edge_play(self, audio, gen):
-        """用 Windows MCI（winmm.dll）播放预生成的 MP3，支持暂停/停止（零第三方依赖）。"""
+        """用平台播放器播放预生成的 MP3（Windows=MCI，macOS/Linux=pygame），支持暂停/停止。"""
         if not audio:
             return False
         tmp_path = None
@@ -1474,32 +1475,31 @@ class SpeechController:
             tmp.write(audio)
             tmp.flush()
             tmp.close()
-            _mci_open(tmp_path)
-            _mci_set_volume(self._volume)  # MCI 层音量（回退）
-            _set_process_volume(self._volume)  # Core Audio 进程音量（主要）
-            _mci_play()
-            while _mci_playing():
+            _player_open(tmp_path)
+            _player_set_volume(self._volume)
+            _player_play()
+            while _player_playing():
                 with self._cv:
                     if self._state == "idle" or self._book is None or self._gen != gen:
-                        _mci_stop()
+                        _player_stop()
                         break
                     if self._state == "paused":
-                        _mci_pause()
+                        _player_pause()
                         self._cv.wait()
                         if self._state == "idle" or self._book is None or self._gen != gen:
-                            _mci_stop()
+                            _player_stop()
                             break
-                        _mci_resume()
+                        _player_resume()
                 time.sleep(0.03)
-            _mci_close()
+            _player_close()
             return True
         except Exception as e:
             self._post({"type": "error", "message": f"播放出错：{e}"})
             return False
         finally:
             try:
-                _mci_stop()
-                _mci_close()
+                _player_stop()
+                _player_close()
             except Exception:
                 pass
             if tmp_path:
@@ -1578,3 +1578,131 @@ def _mci_playing():
     mode = mode.strip().lower()
     return mode in ("playing", "paused")
 
+
+# ---------- 跨平台播放器分发（Windows=MCI / macOS/Linux=pygame） ----------
+_IS_WINDOWS = sys.platform.startswith("win")
+
+
+def _player_open(path):
+    if _IS_WINDOWS:
+        _mci_open(path)
+    else:
+        _pp_open(path)
+
+
+def _player_set_volume(v):
+    if _IS_WINDOWS:
+        _mci_set_volume(v)  # MCI 层音量（回退）
+        _set_process_volume(v)  # Core Audio 进程音量（主要）
+    else:
+        _pp_set_volume(v)
+
+
+def _player_play():
+    if _IS_WINDOWS:
+        _mci_play()
+    else:
+        _pp_play()
+
+
+def _player_pause():
+    if _IS_WINDOWS:
+        _mci_pause()
+    else:
+        _pp_pause()
+
+
+def _player_resume():
+    if _IS_WINDOWS:
+        _mci_resume()
+    else:
+        _pp_resume()
+
+
+def _player_stop():
+    if _IS_WINDOWS:
+        _mci_stop()
+    else:
+        _pp_stop()
+
+
+def _player_close():
+    if _IS_WINDOWS:
+        _mci_close()
+    else:
+        _pp_close()
+
+
+def _player_playing():
+    if _IS_WINDOWS:
+        return _mci_playing()
+    return _pp_playing()
+
+
+# ---------- pygame 播放器（macOS / Linux，懒加载，Windows 打包时排除 pygame 不受影响） ----------
+_pp_paused = False
+
+
+def _pp_open(path):
+    global _pp_paused
+    import pygame
+    if not pygame.mixer.get_init():
+        pygame.mixer.init()
+    _pp_paused = False
+    pygame.mixer.music.load(path)
+
+
+def _pp_set_volume(v):
+    import pygame
+    try:
+        pygame.mixer.music.set_volume(max(0.0, min(1.0, v / 100.0)))
+    except Exception:
+        pass
+
+
+def _pp_play():
+    global _pp_paused
+    import pygame
+    _pp_paused = False
+    pygame.mixer.music.play()
+
+
+def _pp_pause():
+    global _pp_paused
+    import pygame
+    if pygame.mixer.music.get_busy():
+        pygame.mixer.music.pause()
+        _pp_paused = True
+
+
+def _pp_resume():
+    global _pp_paused
+    import pygame
+    pygame.mixer.music.unpause()
+    _pp_paused = False
+
+
+def _pp_stop():
+    global _pp_paused
+    import pygame
+    try:
+        pygame.mixer.music.stop()
+    except Exception:
+        pass
+    _pp_paused = False
+
+
+def _pp_close():
+    global _pp_paused
+    import pygame
+    try:
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
+    except Exception:
+        pass
+    _pp_paused = False
+
+
+def _pp_playing():
+    import pygame
+    return bool(pygame.mixer.music.get_busy()) or _pp_paused

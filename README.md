@@ -170,6 +170,14 @@ DDNovelReader/
 
 MIT License
 
+## 运行环境
+
+- **Windows**：直接运行发布版 exe（PyInstaller 自包含，无需安装 Python）
+- **macOS / Linux**：支持从源码运行（音频播放层已跨平台适配：Windows 用系统 MCI，macOS/Linux 用 pygame）
+  - 安装依赖：pip install -r requirements.txt
+  - macOS 本地朗读使用系统语音（pyttsx3 NSSpeechSynthesizer）；Linux 需安装 espeak：sudo apt install espeak
+  - 运行：python -m novelreader.main（数据目录自动使用用户主目录 ~/DDNovelReader）
+
 ## 版本历史
 
 ### v1.99V4（2026-09-14）
