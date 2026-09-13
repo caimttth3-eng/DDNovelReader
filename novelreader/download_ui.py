@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """整本缓存下载管理器：多书任务列表 / 章节选择 / 暂停继续 / 继续上次 / 自动关机（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -104,6 +104,22 @@ class DownloadMixin:
         tk.Button(ops, text="验证补全", width=9, command=self._cache_mgr_verify).pack(side="left", padx=4)
         tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
         tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
+
+        wk = tk.Frame(win)
+        wk.pack(fill="x", padx=12, pady=(2, 0))
+        tk.Label(wk, text="并发下载线程：", font=("微软雅黑", 9)).pack(side="left")
+        self._cache_workers_var = tk.StringVar(
+            value=str(self.storage.get_setting("tts_cache_workers", 6)))
+        wbox = ttk.Combobox(
+            wk, textvariable=self._cache_workers_var,
+            values=("3", "4", "5", "6", "8", "10", "12"),
+            width=4, state="readonly", font=("微软雅黑", 9))
+        wbox.pack(side="left")
+        wbox.bind("<<ComboboxSelected>>", lambda e: self._cache_workers_save())
+        tk.Label(
+            wk, text="线程越多下载越快；超过 6 易被微软限流，失败重试反而更慢。",
+            fg="#b00020", font=("微软雅黑", 8),
+        ).pack(side="left", padx=8)
 
         self._cache_mgr_status = tk.Label(win, text="", anchor="w", fg="#666666", font=("微软雅黑", 9))
         self._cache_mgr_status.pack(fill="x", padx=12, pady=(0, 8))
@@ -562,6 +578,15 @@ class DownloadMixin:
         self._cache_lb.selection_clear(0, "end")
         if ci < self._cache_lb.size():
             self._cache_lb.selection_set(ci, "end")
+    def _cache_workers_save(self):
+        """保存并发线程数设置并立即生效。"""
+        try:
+            v = int(self._cache_workers_var.get())
+        except Exception:
+            v = 6
+        self.storage.set_setting("tts_cache_workers", v)
+        self.tts.set_cache_workers(v)
+
     def _cache_sync_shutdown(self):
         try:
             self.tts.set_book_cache_auto_shutdown(self._cache_shutdown_var.get(), self._cache_mgr_target_bid)
