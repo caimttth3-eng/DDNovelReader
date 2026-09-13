@@ -85,6 +85,20 @@ class DialogMixin:
         tk.Label(email_row, text="（点击复制）", fg="#999999", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
 
+        bili_row = tk.Frame(info, bg=_about_bg)
+        bili_row.pack(anchor="w", pady=(4, 0))
+        tk.Label(bili_row, text="B站空间：", fg="#555555", bg=_about_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._bili_label = tk.Label(
+            bili_row, text="https://space.bilibili.com/42444", fg="#2b6cb0", bg=_about_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._bili_label.pack(side="left")
+        self._bili_label.bind("<Button-1>", lambda e: self._open_bili())
+        tk.Label(bili_row, text="（点击打开）", fg="#999999", bg=_about_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+        tk.Label(info, text="反馈问题可以在B站动态留言，B站我天天看。", fg="#8a5a00", bg=_about_bg,
+                 font=("微软雅黑", 9)).pack(anchor="w", pady=(4, 0))
+
         nb = ttk.Notebook(top)
         nb.pack(fill="both", expand=True, padx=12, pady=(4, 12))
 
@@ -275,6 +289,11 @@ class DialogMixin:
                 w.bind("<Button-1>", _sw)
             for w in card.winfo_children():
                 w.bind("<Button-1>", _sw)
+    def _open_bili(self):
+        """打开作者 B 站空间。"""
+        import webbrowser
+        webbrowser.open("https://space.bilibili.com/42444")
+
     def _copy_email(self):
         """复制作者邮箱到剪贴板。"""
         email = "230468896@qq.com"

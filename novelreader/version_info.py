@@ -5,13 +5,17 @@ APP_NAME = "多多朗读"
 
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
+
     {
         "version": "1.99V5",
         "date": "2026-09-14",
         "changes": [
             "新增 macOS / Linux 跨平台支持：音频播放层抽象（Windows 保持原 MCI 播放不变，macOS/Linux 自动使用 pygame 播放），Windows 版功能与包体零变化",
-            "GitHub Actions 三平台自动构建：推送代码即自动在 Windows / macOS / Linux 云机打包，发布无需手动跨平台打包",
             "README 新增『运行环境』说明：macOS/Linux 支持源码运行，数据目录自动使用 ~/DDNovelReader",
+
+            "新增蓝牙耳机 / 键盘多媒体键控制：Windows 下连接蓝牙耳机或按键盘媒体键，播放/暂停键切换朗读、停止键停止朗读（软件为前台窗口时生效，与主流播放器一致）",
+
+            "关于界面新增 B站空间链接：点击可打开 https://space.bilibili.com/42444",
         ],
     },
     {

@@ -70,6 +70,10 @@ class NovelReaderBase:
         # 全屏悬浮条每秒刷新
         self.root.after(1000, self._tick_overlay)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # 蓝牙耳机 / 键盘多媒体键（播放/暂停、停止）→ 朗读控制（仅 Windows）
+        self._install_media_keys()
+        # 蓝牙耳机 / 键盘多媒体键（播放/暂停、停止）→ 朗读控制（仅 Windows）
+        self._install_media_keys()
 
         # 先让窗口显示：阅读区放加载占位并立即布局。若在窗口未映射时调用
         # Text.see() 会触发全量布局重算（实测可达 9-11 秒），造成启动白屏卡顿；
@@ -933,6 +937,7 @@ from .download_ui import DownloadMixin
 from .shortcuts_ui import ShortcutsMixin
 from .bookmark_ui import BookmarkMixin
 from .search_ui import SearchMixin
+from .media_keys import MediaKeysMixin
 
 
 class NovelReaderApp(
@@ -948,6 +953,7 @@ class NovelReaderApp(
     ShortcutsMixin,
     BookmarkMixin,
     SearchMixin,
+    MediaKeysMixin,
 ):
     """多多朗读主应用（由基类 + 各功能 Mixin 组装，行为与原单文件一致）。"""
     pass

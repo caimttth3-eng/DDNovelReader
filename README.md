@@ -194,7 +194,6 @@ MIT License
 
 ### v1.99V5（2026-09-14）
 - 新增 macOS / Linux 跨平台支持：音频播放层抽象（Windows 保持原 MCI 播放不变，macOS/Linux 自动使用 pygame 播放），Windows 版功能与包体零变化
-- GitHub Actions 三平台自动构建：推送代码即自动在 Windows / macOS / Linux 云机打包，发布无需手动跨平台打包
 - 新增『运行环境』说明：macOS/Linux 支持源码运行，数据目录自动使用 ~/DDNovelReader
 
 ### v1.99V4（2026-09-14）
