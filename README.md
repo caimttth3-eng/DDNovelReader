@@ -38,7 +38,11 @@
 在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载对应平台的最新版，绿色免安装：
 
 - **Windows**：`DDNovelReader-vX.XX.exe`，双击即可运行
-- **macOS**：`DDNovelReader-macOS-vX.XX.zip`，解压后拖入应用程序
+- **macOS**：`DDNovelReader-macOS-vX.XX.zip`，安装步骤：
+  1. 下载后双击解压，得到 `DDNovelReader.app`
+  2. 把 app 拖入「应用程序」文件夹
+  3. 首次打开若提示「无法验证开发者」：右键 app → 打开 → 再次点击「打开」；或在 系统设置 → 隐私与安全性 中点「仍要打开」
+  4. 若提示「已损坏，无法打开」：打开终端执行 `sudo xattr -dr com.apple.quarantine /Applications/DDNovelReader.app` 后重试
 - **Linux**：`DDNovelReader-linux-vX.XX`，加执行权限后直接运行
 
 ## 使用步骤
