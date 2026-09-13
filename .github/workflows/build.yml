@@ -53,11 +53,15 @@ jobs:
       - name: Build
         run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 novelreader/main.py
       - name: Package
-        run: ditto -c -k --sequesterRsrc --keepParent dist/DDNovelReader.app DDNovelReader-macOS.zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/DDNovelReader.app DDNovelReader-macOS.zip
+          hdiutil create -volname "多多朗读" -srcfolder dist/DDNovelReader.app -ov -format UDZO DDNovelReader-macOS.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: DDNovelReader-macOS
-          path: DDNovelReader-macOS.zip
+          path: |
+            DDNovelReader-macOS.zip
+            DDNovelReader-macOS.dmg
 
   build-linux:
     name: Linux
