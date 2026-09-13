@@ -35,7 +35,11 @@
 
 ## 下载
 
-在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载最新版 `DDNovelReader-vX.XX.exe`，双击即可运行，绿色免安装。
+在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载对应平台的最新版，绿色免安装：
+
+- **Windows**：`DDNovelReader-vX.XX.exe`，双击即可运行
+- **macOS**：`DDNovelReader-macOS-vX.XX.zip`，解压后拖入应用程序
+- **Linux**：`DDNovelReader-linux-vX.XX`，加执行权限后直接运行
 
 ## 使用步骤
 
@@ -179,6 +183,11 @@ MIT License
   - 运行：python -m novelreader.main（数据目录自动使用用户主目录 ~/DDNovelReader）
 
 ## 版本历史
+
+### v1.99V5（2026-09-14）
+- 新增 macOS / Linux 跨平台支持：音频播放层抽象（Windows 保持原 MCI 播放不变，macOS/Linux 自动使用 pygame 播放），Windows 版功能与包体零变化
+- GitHub Actions 三平台自动构建：推送代码即自动在 Windows / macOS / Linux 云机打包，发布无需手动跨平台打包
+- 新增『运行环境』说明：macOS/Linux 支持源码运行，数据目录自动使用 ~/DDNovelReader
 
 ### v1.99V4（2026-09-14）
 - 新增『并发下载线程』设置：下载管理器主窗口下拉框（3/4/5/6/8/10/12），默认 6；线程越多下载越快，超过 6 易被微软限流导致失败重试反而更慢（界面已标注后果）；设置持久化，重启生效，切换即时生效
