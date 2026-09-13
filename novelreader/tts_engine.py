@@ -184,17 +184,20 @@ class WholeBookCacher:
 
     设计要点（保证「缓存期间不影响正常朗读」）：
     - 完全独立于朗读工作线程：不使用 pygame / pyttsx3，不占用朗读音频资源；
-    - 并发限 3 线程，避免打满网络拖慢朗读自身的按需合成；
+    - 并发默认 6 线程（下载管理器可设置 3~12，超过 6 易触发微软限流导致失败重试反而更慢）；
     - 文件先写临时名再 os.replace 原子发布，朗读线程永远读不到半截文件；
     - 朗读侧按 (章节, 句偏移, 语音, 语速, 书籍) 命中缓存则直接播放，整本缓存完成后朗读零网络延迟；
     - 支持暂停/继续、章节选择、续传（已缓存文件自动跳过）、容量统计、完成后自动关机。
     """
 
-    WORKERS = 3
+    WORKERS = 6  # 默认并发下载线程数（可在下载管理器设置 3~12）
     SAVE_INTERVAL = 50  # 每完成 N 个任务保存一次进度
 
     def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None,
-                 bump_cb=None, size_cb=None, flush_cb=None, preset_tasks=None):
+                 bump_cb=None, size_cb=None, flush_cb=None, preset_tasks=None,
+                 workers=None):
+        if workers:
+            self.WORKERS = workers
         self._book = book
         self._book_id = str(book_id or "book")
         # 每本书一个顶层目录：<cache_root>/<book_id>/<语音>/<语速>/
@@ -584,6 +587,7 @@ class SpeechController:
         self._edge_prefetch = None
         self._edge_fail_posted = False
         self._tts_cache_dir = None
+        self._cache_workers = 6  # 整本缓存并发下载线程数（gui 启动时从设置读取）
         # 整本语音缓存：按 book_id 管理，每本书独立缓存器，互不阻塞（支持多书同时缓存）
         self._book_cachers = {}
         self._book_cachers_lock = threading.Lock()
@@ -679,6 +683,13 @@ class SpeechController:
             return None
 
     # ---------- 整本语音缓存 ----------
+    def set_cache_workers(self, n):
+        """设置整本缓存并发下载线程数（1~32，界面限制 3~12）。"""
+        try:
+            self._cache_workers = max(1, min(32, int(n)))
+        except Exception:
+            self._cache_workers = 6
+
     def set_tts_cache_dir(self, path):
         self._tts_size_persist()  # 切换前把脏索引落盘到旧目录（转移时随目录带走）
         self._tts_cache_dir = path
@@ -749,6 +760,7 @@ class SpeechController:
                 book, bid, self._tts_cache_dir, voice, rate, chapter_indices,
                 bump_cb=self._tts_size_bump, size_cb=self.tts_cache_size,
                 flush_cb=self._tts_size_persist,
+                workers=self._cache_workers,
             )
             self._book_cachers[bid] = cacher
         cacher.start(resume=resume)
