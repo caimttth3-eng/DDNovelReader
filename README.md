@@ -43,7 +43,11 @@
   2. 把 app 拖入「应用程序」文件夹
   3. 首次打开若提示「无法验证开发者」：右键 app → 打开 → 再次点击「打开」；或在 系统设置 → 隐私与安全性 中点「仍要打开」
   4. 若提示「已损坏，无法打开」：打开终端执行 `sudo xattr -dr com.apple.quarantine /Applications/DDNovelReader.app` 后重试
-- **Linux**：`DDNovelReader-linux-vX.XX`，加执行权限后直接运行
+- **Linux**：`DDNovelReader-linux-vX.XX`，安装步骤：
+  1. 下载后在终端进入文件所在目录
+  2. 加执行权限：`chmod +x DDNovelReader-linux-vX.XX`
+  3. 运行：`./DDNovelReader-linux-vX.XX`
+  4. 本地语音朗读需安装 espeak：Ubuntu/Debian 执行 `sudo apt install espeak`，Fedora 执行 `sudo dnf install espeak-ng`（Edge 在线语音无需安装）
 
 ## 使用步骤
 
