@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """主界面基类：启动加载 + UI 构建 + 公共工具（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -42,6 +42,7 @@ class NovelReaderBase:
         self.storage = Storage()
         self.tts = SpeechController()
         self.tts.set_tts_cache_dir(self._effective_tts_cache_root())
+        self.tts.set_cache_workers(self.storage.get_setting("tts_cache_workers", 6))
 
         self.current_bid = None
         self.book = None          # BookContent
