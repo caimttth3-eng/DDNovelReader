@@ -424,6 +424,23 @@ class NovelReaderBase:
 
         self.settings["ui_theme"] = name
         self.storage.set_setting("ui_theme", name)
+    def restore_window(self):
+        """单实例激活：把已有主窗口还原并置前（取消最小化 / 拉回前台）。"""
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            try:
+                self.root.attributes("-topmost", True)
+                self.root.update_idletasks()
+                self.root.attributes("-topmost", False)
+            except Exception:
+                pass
+            try:
+                self.root.focus_force()
+            except Exception:
+                pass
+        except Exception:
+            pass
     def _center_window(self, win):
         """把弹窗移动到屏幕正中间（不改变窗口大小）。"""
         try:
@@ -668,7 +685,9 @@ class NovelReaderBase:
         self.toc_btn = ttk.Button(right1, text=_T("目录"), command=self._toggle_toc)
         self.toc_btn.pack(side="left", padx=2)
         ttk.Separator(right1, orient="vertical").pack(side="left", fill="y", padx=4)
-        ttk.Button(right1, text=_T("关于"), command=self._show_about).pack(side="left", padx=2)
+        _settings_btn = ttk.Button(right1, text=_T("设置"))
+        _settings_btn.pack(side="left", padx=2)
+        _settings_btn.bind("<Button-1>", lambda e: self._open_settings_menu(e))
 
         # ---- 第 2 行：排版外观 ----
         row2 = tk.Frame(bar)

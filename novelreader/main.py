@@ -70,6 +70,17 @@ def main():
         if BASE not in sys.path:
             sys.path.insert(0, BASE)
 
+    # 单实例：已有主程序在运行时，通知其还原窗口后本实例直接退出
+    import queue as _queue
+
+    from novelreader.single_instance import SingleInstance
+
+    _si = SingleInstance()
+    if not _si.acquired:
+        if not _si.notify_existing():
+            sys.stderr.write("DDNovelReader: single-instance port busy; cannot start a second instance.\n")
+        return
+
     import tkinter as tk
 
     from novelreader.gui import NovelReaderApp
@@ -81,7 +92,25 @@ def main():
         root = TkinterDnD.Tk()
     except Exception:
         root = tk.Tk()
-    NovelReaderApp(root)
+    app = NovelReaderApp(root)
+
+    # 轮询单实例激活队列：收到请求就在主线程还原窗口（线程安全）
+    _q = _queue.Queue()
+    _si.start_listener(_q)
+
+    def _poll_activate():
+        try:
+            while True:
+                _q.get_nowait()
+                app.restore_window()
+        except _queue.Empty:
+            pass
+        try:
+            root.after(200, _poll_activate)
+        except Exception:
+            pass
+
+    root.after(200, _poll_activate)
     root.mainloop()
 
 

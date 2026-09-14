@@ -38,161 +38,148 @@ from .constants import (
 
 class DialogMixin:
     """弹窗：关于 / 皮肤选择 / 邮箱复制 / 定时停止 / 百分比跳转"""
-    def _show_about(self):
-        from . import version_info
+    def _open_settings_menu(self, event=None):
+        """主界面「设置」按钮：在按钮/鼠标下方弹出纵向列表面板（方案 C）。
 
-        top = tk.Toplevel(self.root)
-        top.title(f"{_T('关于')} {version_info.APP_NAME}")
-        top.geometry("700x800")
-        top.minsize(560, 620)
-        top.transient(self.root)
-        self._center_window(top)
-        _about_bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
-        top.configure(bg=_about_bg)
+        四入口：缓存管理 / 快捷键说明 / 更新记录 / 关于，每行带图标与小注，
+        hover 高亮整行，点击主界面任意处自动收起。
+        """
+        self._close_settings_panel()
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        _card_bg = "#FFFFFF"
+        _border = "#DDE3EC"
+        _hover = "#E8EEFB"
+        _main_fg = "#1A1B1C"
+        _sub_fg = "#9AA0A6"
 
-        head = tk.Frame(top, bg=_about_bg)
-        head.pack(fill="x", padx=18, pady=(16, 6))
-        # 左侧：当前图标（彩蛋：点击进入主题选择）
-        icon_col = tk.Frame(head, bg=_about_bg)
-        icon_col.pack(side="left", padx=(0, 14))
+        panel = tk.Toplevel(self.root)
+        panel.overrideredirect(True)
+        panel.configure(bg=_bg)
         try:
-            png = self._current_skin_png()
-            if png:
-                self._about_icon_img = tk.PhotoImage(file=png)
-                self._about_icon_img = self._about_icon_img.subsample(4, 4)
-                icon_lbl = tk.Label(icon_col, image=self._about_icon_img, bg=_about_bg, cursor="hand2")
-                icon_lbl.pack()
-                icon_lbl.bind("<Button-1>", lambda e: self._open_skin_picker())
-                tk.Label(icon_col, text=_T("点击换主题"), fg="#999999", bg=_about_bg,
-                         font=("微软雅黑", 8)).pack(pady=(2, 0))
+            panel.attributes("-topmost", True)
         except Exception:
             pass
-        # 右侧：文字信息
-        info = tk.Frame(head, bg=_about_bg)
-        info.pack(side="left", fill="x", expand=True)
-        tk.Label(info, text=f"{_T(version_info.APP_NAME)}  v{__version__}",
-                 font=("微软雅黑", 17, "bold"), bg=_about_bg).pack(anchor="w")
-        tk.Label(info, text=_T("支持 Windows / macOS / Linux / Android 的有声小说阅读器（多多朗读）  ·  当前版本 v{version}").format(version=__version__),
-                 fg="#777777", bg=_about_bg, font=("微软雅黑", 10)).pack(anchor="w", pady=(2, 0))
-        email_row = tk.Frame(info, bg=_about_bg)
-        email_row.pack(anchor="w", pady=(6, 0))
-        tk.Label(email_row, text=_T("作者联系方式："), fg="#555555", bg=_about_bg,
-                 font=("微软雅黑", 10)).pack(side="left")
-        self._email_label = tk.Label(
-            email_row, text="230468896@qq.com", fg="#2b6cb0", bg=_about_bg,
-            font=("微软雅黑", 10, "underline"), cursor="hand2")
-        self._email_label.pack(side="left")
-        self._email_label.bind("<Button-1>", lambda e: self._copy_email())
-        tk.Label(email_row, text=_T("（点击复制）"), fg="#999999", bg=_about_bg,
-                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
 
-        bili_row = tk.Frame(info, bg=_about_bg)
-        bili_row.pack(anchor="w", pady=(4, 0))
-        tk.Label(bili_row, text=_T("B站空间："), fg="#555555", bg=_about_bg,
-                 font=("微软雅黑", 10)).pack(side="left")
-        self._bili_label = tk.Label(
-            bili_row, text="https://space.bilibili.com/42444", fg="#2b6cb0", bg=_about_bg,
-            font=("微软雅黑", 10, "underline"), cursor="hand2")
-        self._bili_label.pack(side="left")
-        self._bili_label.bind("<Button-1>", lambda e: self._open_bili())
-        tk.Label(bili_row, text=_T("（点击打开）"), fg="#999999", bg=_about_bg,
-                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
-        tk.Label(info, text=_T("反馈问题可以在B站动态留言，B站我天天看。"), fg="#8a5a00", bg=_about_bg,
-                 font=("微软雅黑", 9)).pack(anchor="w", pady=(4, 0))
+        outer = tk.Frame(panel, bg=_bg, padx=4, pady=4)
+        outer.pack()
+        box = tk.Frame(outer, bg=_card_bg, highlightbackground=_border, highlightthickness=1)
+        box.pack()
 
-        dy_row = tk.Frame(info, bg=_about_bg)
-        dy_row.pack(anchor="w", pady=(2, 0))
-        tk.Label(dy_row, text=_T("抖音号："), fg="#555555", bg=_about_bg,
-                 font=("微软雅黑", 10)).pack(side="left")
-        self._dy_label = tk.Label(
-            dy_row, text="120735162", fg="#2b6cb0", bg=_about_bg,
-            font=("微软雅黑", 10, "underline"), cursor="hand2")
-        self._dy_label.pack(side="left")
-        self._dy_label.bind("<Button-1>", lambda e: self._copy_douyin())
-        tk.Label(dy_row, text=_T("（点击复制）"), fg="#999999", bg=_about_bg,
-                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+        # 加载 4 枚线性图标（透明 PNG，随主题背景）
+        if not getattr(self, "_settings_icons", None):
+            self._settings_icons = {}
 
-        gh_row = tk.Frame(info, bg=_about_bg)
-        gh_row.pack(anchor="w", pady=(2, 0))
-        tk.Label(gh_row, text=_T("软件发布："), fg="#555555", bg=_about_bg,
-                 font=("微软雅黑", 10)).pack(side="left")
-        self._gh_label = tk.Label(
-            gh_row, text="github.com/caimttth3-eng/DDNovelReader", fg="#2b6cb0", bg=_about_bg,
-            font=("微软雅黑", 10, "underline"), cursor="hand2")
-        self._gh_label.pack(side="left")
-        self._gh_label.bind("<Button-1>", lambda e: self._open_github())
-        tk.Label(gh_row, text=_T("（点击打开）"), fg="#999999", bg=_about_bg,
-                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+        def _icon_path(name):
+            _base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            return os.path.join(_base, "assets", "icons", name + ".png")
 
-        lang_row = tk.Frame(info, bg=_about_bg)
-        lang_row.pack(anchor="w", pady=(8, 0))
-        tk.Label(lang_row, text=_T("界面语言"), fg="#555555", bg=_about_bg,
-                 font=("微软雅黑", 10)).pack(side="left")
-        lang_cb = ttk.Combobox(lang_row, state="readonly", width=10,
-                               values=["中文", "English", "日本語", "한국어"])
-        lang_cb.pack(side="left")
-        from .i18n import get_lang as _get_lang
-        _lang_map = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
-        lang_cb.set(_lang_map.get(_get_lang(), "中文"))
-        def _on_lang(e=None):
-            v = lang_cb.get()
-            _rev = {n: c for c, n in _lang_map.items()}
-            self.storage.set_setting("ui_lang", _rev.get(v, "zh"))
-            messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
-        lang_cb.bind("<<ComboboxSelected>>", _on_lang)
+        for _n in ("cache", "keyboard", "changelog", "about"):
+            if _n not in self._settings_icons:
+                try:
+                    self._settings_icons[_n] = tk.PhotoImage(file=_icon_path(_n))
+                except Exception:
+                    self._settings_icons[_n] = None
 
-        nb = ttk.Notebook(top)
-        nb.pack(fill="both", expand=True, padx=12, pady=(4, 12))
+        entries = [
+            ("cache", _T("缓存管理"), _T("正文/音频"), self._show_cache_manager_dialog),
+            ("keyboard", _T("快捷键说明"), _T("Ctrl/±"), self._show_shortcuts_dialog),
+            ("changelog", _T("更新记录"), _T("版本历史"), self._show_changelog_dialog),
+            ("about", _T("关于"), _T("版本/作者"), self._show_about),
+        ]
 
-        tab_update = tk.Frame(nb)
-        tab_keys = tk.Frame(nb)
-        tab_cache = tk.Frame(nb)
-        nb.add(tab_update, text=_T("更新记录"))
-        nb.add(tab_keys, text=_T("快捷键说明"))
-        nb.add(tab_cache, text=_T("缓存管理"))
+        def _make_row(icon, title, note, cmd):
+            row = tk.Frame(box, bg=_card_bg, cursor="hand2")
+            row.pack(fill="x")
+            _img = self._settings_icons.get(icon)
+            if _img is not None:
+                _icon_lbl = tk.Label(row, image=_img, bg=_card_bg)
+                _icon_lbl.pack(side="left", padx=(12, 8), pady=7)
+            else:
+                _icon_lbl = tk.Label(row, text="•", font=("微软雅黑", 13), bg=_card_bg)
+                _icon_lbl.pack(side="left", padx=(12, 8), pady=8)
+            tk.Label(row, text=title, font=("微软雅黑", 10, "bold"),
+                     bg=_card_bg, fg=_main_fg).pack(side="left", pady=8)
+            tk.Label(row, text=note, font=("微软雅黑", 8),
+                     bg=_card_bg, fg=_sub_fg).pack(side="right", padx=12, pady=8)
+            children = list(row.winfo_children())
 
-        txt = tk.Text(tab_update, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
-        tsb = make_scrollbar(tab_update, txt.yview)
-        txt.configure(yscrollcommand=tsb.set)
-        tsb.pack(side="right", fill="y")
-        txt.pack(side="left", fill="both", expand=True)
-        txt.insert("end", version_info.format_history())
-        txt.configure(state="disabled")
+            def _enter(_e):
+                row.configure(bg=_hover)
+                for w in children:
+                    w.configure(bg=_hover)
 
-        keys = tk.Text(tab_keys, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
-        ksb = make_scrollbar(tab_keys, keys.yview)
-        keys.configure(yscrollcommand=ksb.set)
-        ksb.pack(side="right", fill="y")
-        keys.pack(side="left", fill="both", expand=True)
-        from .i18n import get_lang as _gl_keys
-        _col = {"zh": 1, "en": 2, "ja": 3, "ko": 4}.get(_gl_keys(), 2)
-        for _item in version_info.SHORTCUTS:
-            keys.insert("end", f"{_item[0]}\n    {_item[_col]}\n\n")
-        keys.configure(state="disabled")
+            def _leave(_e):
+                row.configure(bg=_card_bg)
+                for w in children:
+                    w.configure(bg=_card_bg)
 
-        # —— 缓存管理（可滚动卡片式布局） ——
-        tab_cache.configure(bg=_about_bg)
-        cache_canvas = tk.Canvas(tab_cache, bg=_about_bg, highlightthickness=0, bd=0)
-        cache_scroll = make_scrollbar(tab_cache, cache_canvas.yview)
-        cache_inner = tk.Frame(cache_canvas, bg=_about_bg)
-        cache_inner.bind("<Configure>", lambda e: cache_canvas.configure(scrollregion=cache_canvas.bbox("all")))
-        cache_canvas.create_window((0, 0), window=cache_inner, anchor="nw")
-        cache_canvas.configure(yscrollcommand=cache_scroll.set)
-        cache_scroll.pack(side="right", fill="y")
-        cache_canvas.pack(side="left", fill="both", expand=True)
+            def _click(_e=None):
+                self._close_settings_panel()
+                cmd()
 
-        def _cache_mwheel(event):
-            cache_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        cache_canvas.bind("<Enter>", lambda e: cache_canvas.bind_all("<MouseWheel>", _cache_mwheel))
-        cache_canvas.bind("<Leave>", lambda e: cache_canvas.unbind_all("<MouseWheel>"))
+            for w in [row] + children:
+                w.bind("<Enter>", _enter)
+                w.bind("<Leave>", _leave)
+                w.bind("<Button-1>", _click)
+
+        for it in entries:
+            _make_row(*it)
+
+        if event is not None:
+            x, y = event.x_root, event.y_root
+        else:
+            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+        panel.update_idletasks()
+        _w, _h = panel.winfo_reqwidth(), panel.winfo_reqheight()
+        _sw, _sh = panel.winfo_screenwidth(), panel.winfo_screenheight()
+        if x + _w > _sw - 8:
+            x = _sw - _w - 8
+        if y + _h > _sh - 8:
+            y = _sh - _h - 8
+        panel.geometry(f"+{x}+{y}")
+
+        self._settings_panel = panel
+        self._settings_panel_close_id = self.root.bind(
+            "<Button-1>", lambda _e: self._close_settings_panel(), add="+")
+
+    def _close_settings_panel(self):
+        """收起设置列表面板，并解除主窗口的点击监听。"""
+        if getattr(self, "_settings_panel", None) is not None:
+            try:
+                self._settings_panel.destroy()
+            except Exception:
+                pass
+            self._settings_panel = None
+        cid = getattr(self, "_settings_panel_close_id", None)
+        if cid:
+            try:
+                self.root.unbind("<Button-1>", cid)
+            except Exception:
+                pass
+            self._settings_panel_close_id = None
+
+    def _show_cache_manager_dialog(self):
+        """独立弹窗：缓存管理（正文解析缓存 / 音频缓存）。
+
+        从根上不引入滚动容器：两张卡片直接平铺，窗口宽度/高度按真实内容
+        自适应（路径较长自动换行会撑高窗口），内容刚好放下就绝不出现
+        滚动条；仅在屏幕不足以容纳时按屏幕高度收敛。
+        """
+        top = tk.Toplevel(self.root)
+        top.title(_T("缓存管理"))
+        top.transient(self.root)
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_bg)
+
+        body = tk.Frame(top, bg=_bg)
+        body.pack(fill="both", expand=True, padx=10, pady=10)
 
         def _make_cache_card(parent, title, subtitle, icon, accent, kind):
             """创建一个缓存管理卡片。kind: 'text' or 'audio'."""
             _card_bg = UI_THEMES.get(self.settings.get("ui_theme", "A·米黄暖读"), UI_THEMES["A·米黄暖读"])["field"]
             card = tk.Frame(parent, bg=_card_bg, highlightbackground="#e2e5ea", highlightthickness=1)
-            card.pack(fill="x", padx=14, pady=(12, 0))
+            card.pack(fill="x", padx=6, pady=(0, 12))
 
-            # 标题行
             head = tk.Frame(card, bg=_card_bg)
             head.pack(fill="x", padx=14, pady=(12, 4))
             tk.Label(head, text=icon, font=("微软雅黑", 14), bg=_card_bg).pack(side="left")
@@ -200,24 +187,20 @@ class DialogMixin:
             loc_lbl = tk.Label(head, text="", font=("微软雅黑", 9), fg="#999999", bg=_card_bg)
             loc_lbl.pack(side="right")
 
-            # 副标题（精简说明）
             if subtitle:
                 tk.Label(card, text=subtitle, font=("微软雅黑", 9), fg="#888888", bg=_card_bg,
-                         wraplength=520, justify="left").pack(anchor="w", padx=14, pady=(0, 4))
+                         wraplength=580, justify="left").pack(anchor="w", padx=14, pady=(0, 4))
 
-            # 路径
             path_text = self._effective_text_cache_root() if kind == "text" else self._effective_tts_cache_root()
             path_lbl = tk.Label(card, text=path_text, font=("微软雅黑", 9), fg="#2b6cb0",
-                                bg=_card_bg, wraplength=520, justify="left", cursor="hand2")
+                                bg=_card_bg, wraplength=580, justify="left", cursor="hand2")
             path_lbl.pack(anchor="w", padx=14, pady=(2, 2))
             open_cmd = self._open_cache_folder if kind == "text" else self._open_tts_cache_folder
             path_lbl.bind("<Button-1>", lambda e: open_cmd())
 
-            # 大小
             size_lbl = tk.Label(card, text=_T("正在统计…"), font=("微软雅黑", 10), fg="#444444", bg=_card_bg)
             size_lbl.pack(anchor="w", padx=14, pady=(2, 6))
 
-            # 按钮行
             btn_row = tk.Frame(card, bg=_card_bg)
             btn_row.pack(anchor="w", padx=14, pady=(0, 12))
             if kind == "text":
@@ -238,22 +221,20 @@ class DialogMixin:
                            command=self._open_tts_cache_folder).pack(side="left", padx=(8, 0))
                 ttk.Button(btn_row, text=_T("清除"),
                            command=lambda: self._clear_audio_cache(tts_size_lbl)).pack(side="left", padx=(8, 0))
-
             return path_lbl, size_lbl, loc_lbl
 
         # 正文解析缓存卡片
         path_lbl, size_lbl, loc_lbl1 = _make_cache_card(
-            cache_inner,
+            body,
             title=_T("正文解析缓存"),
             subtitle=_T("书籍分章解析结果，删除后下次打开需重新解析（不影响原文件）。"),
             icon="📄",
             accent="#2b6cb0",
             kind="text",
         )
-
         # 音频缓存卡片
         tts_path_lbl, tts_size_lbl, loc_lbl2 = _make_cache_card(
-            cache_inner,
+            body,
             title=_T("音频缓存（整本语音）"),
             subtitle=_T("整本语音合成缓存，体积较大，建议放到非 C 盘。"),
             icon="🔊",
@@ -261,19 +242,190 @@ class DialogMixin:
             kind="audio",
         )
 
-        # 底部留白
-        tk.Frame(cache_inner, bg=_about_bg, height=14).pack()
+        def _fit_window():
+            """按 body 真实请求尺寸贴合窗口并居中（内容变高时窗口跟着长）。"""
+            top.update_idletasks()
+            _w = min(max(body.winfo_reqwidth() + 20, 620), int(top.winfo_screenwidth() * 0.94))
+            _h = min(body.winfo_reqheight() + 26, int(top.winfo_screenheight() * 0.94))
+            top.geometry(f"{_w}x{_h}")
+            self._center_window(top)
 
-        # 统计大小（延迟到窗口显示后）
         def _refresh_sizes():
             self._update_cache_size_label(size_lbl)
             self._update_tts_cache_size_label(tts_size_lbl)
             loc_lbl1.configure(text=_T("自定义位置") if self.settings.get("cache_dir") else _T("默认位置"))
             loc_lbl2.configure(text=_T("自定义位置") if self.settings.get("tts_cache_dir") else _T("默认位置"))
-        top.after(120, _refresh_sizes)
+            _fit_window()
 
+        _fit_window()
+        top.after(120, _refresh_sizes)
+        top.focus_set()
+
+    def _show_shortcuts_dialog(self):
+        """独立弹窗：快捷键说明（按当前界面语言单列显示）。"""
+        from . import version_info
+        from .i18n import get_lang as _gl
+
+        top = tk.Toplevel(self.root)
+        top.title(_T("快捷键说明"))
+        top.geometry("560x620")
+        top.minsize(440, 420)
+        top.transient(self.root)
+        self._center_window(top)
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_bg)
+
+        keys = tk.Text(top, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
+        ksb = make_scrollbar(top, keys.yview)
+        keys.configure(yscrollcommand=ksb.set)
+        ksb.pack(side="right", fill="y")
+        keys.pack(side="left", fill="both", expand=True)
+        _col = {"zh": 1, "en": 2, "ja": 3, "ko": 4}.get(_gl(), 2)
+        for _item in version_info.SHORTCUTS:
+            keys.insert("end", f"{_item[0]}\n    {_item[_col]}\n\n")
+        keys.configure(state="disabled")
+        top.focus_set()
+
+    def _show_changelog_dialog(self):
+        """独立弹窗：更新记录（正文保持原文，不翻译）。"""
+        from . import version_info
+
+        top = tk.Toplevel(self.root)
+        top.title(_T("更新记录"))
+        top.geometry("640x620")
+        top.minsize(500, 420)
+        top.transient(self.root)
+        self._center_window(top)
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_bg)
+
+        txt = tk.Text(top, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
+        tsb = make_scrollbar(top, txt.yview)
+        txt.configure(yscrollcommand=tsb.set)
+        tsb.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+        txt.insert("end", version_info.format_history())
+        txt.configure(state="disabled")
+        top.focus_set()
+
+    def _show_about(self):
+        """独立弹窗：关于（版本信息 / 图标彩蛋 / 作者联系方式 / 界面语言）。"""
+        from . import version_info
+
+        top = tk.Toplevel(self.root)
+        top.title(f"{_T('关于')} {version_info.APP_NAME}")
+        top.geometry("660x560")
+        top.minsize(560, 480)
+        top.transient(self.root)
+        self._center_window(top)
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_bg)
+
+        head = tk.Frame(top, bg=_bg)
+        head.pack(fill="x", padx=18, pady=(16, 6))
+        # 左侧：当前图标（彩蛋：点击进入主题选择）
+        icon_col = tk.Frame(head, bg=_bg)
+        icon_col.pack(side="left", padx=(0, 14))
+        try:
+            png = self._current_skin_png()
+            if png:
+                self._about_icon_img = tk.PhotoImage(file=png)
+                self._about_icon_img = self._about_icon_img.subsample(4, 4)
+                icon_lbl = tk.Label(icon_col, image=self._about_icon_img, bg=_bg, cursor="hand2")
+                icon_lbl.pack()
+                icon_lbl.bind("<Button-1>", lambda e: self._open_skin_picker())
+                tk.Label(icon_col, text=_T("点击换主题"), fg="#999999", bg=_bg,
+                         font=("微软雅黑", 8)).pack(pady=(2, 0))
+        except Exception:
+            pass
+        # 右侧：文字信息
+        info = tk.Frame(head, bg=_bg)
+        info.pack(side="left", fill="x", expand=True)
+        tk.Label(info, text=f"{_T(version_info.APP_NAME)}  v{__version__}",
+                 font=("微软雅黑", 17, "bold"), bg=_bg).pack(anchor="w")
+        tk.Label(info, text=_T("支持 Windows / macOS / Linux / Android 的有声小说阅读器（多多朗读）  ·  当前版本 v{version}").format(version=__version__),
+                 fg="#777777", bg=_bg, font=("微软雅黑", 10),
+                 wraplength=520, justify="left").pack(anchor="w", pady=(2, 0))
+        email_row = tk.Frame(info, bg=_bg)
+        email_row.pack(anchor="w", pady=(6, 0))
+        tk.Label(email_row, text=_T("作者联系方式："), fg="#555555", bg=_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._email_label = tk.Label(
+            email_row, text="230468896@qq.com", fg="#2b6cb0", bg=_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._email_label.pack(side="left")
+        self._email_label.bind("<Button-1>", lambda e: self._copy_email())
+        tk.Label(email_row, text=_T("（点击复制）"), fg="#999999", bg=_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
+        bili_row = tk.Frame(info, bg=_bg)
+        bili_row.pack(anchor="w", pady=(4, 0))
+        tk.Label(bili_row, text=_T("B站空间："), fg="#555555", bg=_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._bili_label = tk.Label(
+            bili_row, text="https://space.bilibili.com/42444", fg="#2b6cb0", bg=_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._bili_label.pack(side="left")
+        self._bili_label.bind("<Button-1>", lambda e: self._open_bili())
+        tk.Label(bili_row, text=_T("（点击打开）"), fg="#999999", bg=_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+        tk.Label(info, text=_T("反馈问题可以在B站动态留言，B站我天天看。"), fg="#8a5a00", bg=_bg,
+                 font=("微软雅黑", 9), wraplength=520, justify="left").pack(anchor="w", pady=(4, 0))
+
+        dy_row = tk.Frame(info, bg=_bg)
+        dy_row.pack(anchor="w", pady=(2, 0))
+        tk.Label(dy_row, text=_T("抖音号："), fg="#555555", bg=_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._dy_label = tk.Label(
+            dy_row, text="120735162", fg="#2b6cb0", bg=_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._dy_label.pack(side="left")
+        self._dy_label.bind("<Button-1>", lambda e: self._copy_douyin())
+        tk.Label(dy_row, text=_T("（点击复制）"), fg="#999999", bg=_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
+        gh_row = tk.Frame(info, bg=_bg)
+        gh_row.pack(anchor="w", pady=(2, 0))
+        tk.Label(gh_row, text=_T("软件发布："), fg="#555555", bg=_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._gh_label = tk.Label(
+            gh_row, text="github.com/caimttth3-eng/DDNovelReader", fg="#2b6cb0", bg=_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._gh_label.pack(side="left")
+        self._gh_label.bind("<Button-1>", lambda e: self._open_github())
+        tk.Label(gh_row, text=_T("（点击打开）"), fg="#999999", bg=_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
+        lang_row = tk.Frame(info, bg=_bg)
+        lang_row.pack(anchor="w", pady=(8, 0))
+        tk.Label(lang_row, text=_T("界面语言"), fg="#555555", bg=_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        lang_cb = ttk.Combobox(lang_row, state="readonly", width=10,
+                               values=["中文", "English", "日本語", "한국어"])
+        lang_cb.pack(side="left")
+        from .i18n import get_lang as _get_lang
+        _lang_map = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
+        lang_cb.set(_lang_map.get(_get_lang(), "中文"))
+        def _on_lang(e=None):
+            v = lang_cb.get()
+            _rev = {n: c for c, n in _lang_map.items()}
+            self.storage.set_setting("ui_lang", _rev.get(v, "zh"))
+            messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
+        lang_cb.bind("<<ComboboxSelected>>", _on_lang)
+
+        tk.Label(top, text=_T("更多功能请从主界面「设置」打开（缓存管理 / 快捷键说明 / 更新记录）。"),
+                 fg="#8a5a00", bg=_bg, font=("微软雅黑", 9),
+                 wraplength=560, justify="left").pack(anchor="w", padx=20, pady=(8, 12))
+
+        # 按内容自适应大小并居中（长文本已换行，窗口刚好放下内容）
+        top.update_idletasks()
+        _w = min(max(top.winfo_reqwidth(), 620), int(top.winfo_screenwidth() * 0.94))
+        _h = min(top.winfo_reqheight() + 24, int(top.winfo_screenheight() * 0.94))
+        top.geometry(f"{_w}x{_h}")
+        self._center_window(top)
         self._about_win = top
         top.focus_set()
+
     def _open_skin_picker(self):
         """主题选择：六套控件风格（A-F），点击即切换，即时生效。"""
         top = tk.Toplevel(self.root)
