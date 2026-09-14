@@ -1,10 +1,11 @@
 ﻿# 多多朗读（DDNovelReader）
 
-支持 **Windows / macOS / Linux** 三平台的中文小说阅读器：**TTS 语音朗读**、主流电子书格式、
-书架管理、阅读进度自动保存与自动续读、整本语音缓存。
+支持 **Windows / macOS / Linux / Android** 四平台的中文小说阅读器：**TTS 语音朗读**、
+主流电子书格式、书架管理、阅读进度自动保存与自动续读、整本语音缓存。
 - **Windows**：绿色免安装 exe，双击即用
 - **macOS**：DMG 拖入即装（或 ZIP 解压），支持 M 系列与 Intel
 - **Linux**：单文件可直接运行
+- **Android**：前往 [安卓版发布页](https://github.com/caimttth3-eng/DDNovelReader-Android) 下载
 
 ## 功能一览
 
