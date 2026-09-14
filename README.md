@@ -65,10 +65,18 @@
 
 ## 数据存放位置
 
-- 书架与阅读进度：`%APPDATA%\DDNovelReader\library.json`
-- 书籍解析缓存：`%APPDATA%\DDNovelReader\cache\`
-- 源文件备份：`%APPDATA%\DDNovelReader\cache\sources\`（导入书籍时自动备份原文件，原文件删除后仍可重解析 / 复制）
-- 语音缓存：`%APPDATA%\DDNovelReader\tts_cache\`（可在"关于→缓存管理"中自定义位置）
+数据目录规则：若设置了环境变量 `DOUBAO_NOVEL_DATA` 则优先使用；否则按平台回退：
+
+- **Windows**：`%APPDATA%\DDNovelReader\`（即 `C:\Users\<用户名>\AppData\Roaming\DDNovelReader\`）
+- **macOS**：`~/DDNovelReader/`（即 `/Users/<用户名>/DDNovelReader/`）
+- **Linux**：`~/DDNovelReader/`（即 `/home/<用户名>/DDNovelReader/`）
+
+目录内容：
+
+- `library.json` — 书架、阅读进度、全部设置
+- `cache/` — 书籍解析缓存
+- `cache/sources/` — 源文件备份（导入书籍时自动备份原文件，原文件删除后仍可重解析 / 复制）
+- `tts_cache/` — 整本语音缓存（可在「关于 → 缓存管理」中自定义位置，便于移出系统盘）
 
 ## 常见问题
 
