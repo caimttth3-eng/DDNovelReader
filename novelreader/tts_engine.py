@@ -65,6 +65,42 @@ EDGE_VOICES = [
     ("zh-CN-liaoning-XiaobeiNeural", "晓北·女声·东北腔"),
 ]
 
+# 免费优质英文 Edge 语音（美音 + 英音，英文界面默认备选）
+EDGE_VOICES_EN = [
+    # 美音 US
+    ("en-US-AriaNeural", "Aria · Female · Natural (US)"),
+    ("en-US-JennyNeural", "Jenny · Female · Friendly (US)"),
+    ("en-US-MichelleNeural", "Michelle · Female · Warm (US)"),
+    ("en-US-GuyNeural", "Guy · Male · Calm (US)"),
+    ("en-US-EricNeural", "Eric · Male · Calm (US)"),
+    ("en-US-DavisNeural", "Davis · Male · Young (US)"),
+    ("en-US-ChristopherNeural", "Christopher · Male · Deep (US)"),
+    ("en-US-SteffanNeural", "Steffan · Male · Young (US)"),
+    # 英音 UK
+    ("en-GB-SoniaNeural", "Sonia · Female · British · Elegant (UK)"),
+    ("en-GB-LibbyNeural", "Libby · Female · British · Warm (UK)"),
+    ("en-GB-MaisieNeural", "Maisie · Female · British · Cheerful (UK)"),
+    ("en-GB-RyanNeural", "Ryan · Male · British (UK)"),
+    ("en-GB-ThomasNeural", "Thomas · Male · British (UK)"),
+]
+
+# 日语 Edge 语音
+EDGE_VOICES_JA = [
+    ("ja-JP-NanamiNeural", "Nanami · Female · Natural (JP)"),
+    ("ja-JP-MayuNeural", "Mayu · Female · Cheerful (JP)"),
+    ("ja-JP-ShioriNeural", "Shiori · Female · Soft (JP)"),
+    ("ja-JP-KeitaNeural", "Keita · Male · Natural (JP)"),
+    ("ja-JP-DaichiNeural", "Daichi · Male · Deep (JP)"),
+]
+
+# 韩语 Edge 语音
+EDGE_VOICES_KO = [
+    ("ko-KR-SunHiNeural", "SunHi · Female · Warm (KR)"),
+    ("ko-KR-JiMinNeural", "JiMin · Female · Cheerful (KR)"),
+    ("ko-KR-InJoonNeural", "InJoon · Male · Calm (KR)"),
+    ("ko-KR-HyunsuNeural", "Hyunsu · Male · Young (KR)"),
+]
+
 
 def split_sentences(text):
     """把正文切成朗读用的小句：优先按句末标点，长句按逗号/换行二次切分。"""
@@ -1164,7 +1200,10 @@ class SpeechController:
         return result
 
     @staticmethod
-    def list_edge_voices():
+    def list_edge_voices(lang="zh"):
+        """按界面语言返回 Edge 语音备选：en → 英文音色（美音+英音），其余 → 中文音色。"""
+        if lang == "en":
+            return list(EDGE_VOICES_EN)
         return list(EDGE_VOICES)
 
     @staticmethod

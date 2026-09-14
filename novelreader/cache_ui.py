@@ -47,7 +47,7 @@ class CacheMixin:
             os.makedirs(d, exist_ok=True)
             os.startfile(d)
         except Exception as e:
-            messagebox.showerror(_T("无法打开"), f"打开缓存文件夹失败：{e}")
+            messagebox.showerror(_T("无法打开"), _T("打开缓存文件夹失败：{e}").format(e=e))
     def _choose_text_cache_folder(self, path_lbl=None, size_lbl=None):
         """自定义正文解析缓存文件夹：可顺带一键转移。"""
         cur = self._effective_text_cache_root()
@@ -58,10 +58,8 @@ class CacheMixin:
         if not d:
             return
         move = messagebox.askyesno(
-            "转移缓存",
-            f"已选择新缓存文件夹：\n{d}\n\n"
-            "是否现在把现有缓存转移到新位置？\n"
-            "（选择「否」则仅切换位置，不移动现有文件）",
+            _T("转移缓存"),
+            _T("已选择新缓存文件夹：\n{d}\n\n").format(d=d) + _T("是否现在把现有缓存转移到新位置？\n（选择「否」则仅切换位置，不移动现有文件）"),
         )
         if move:
             self._do_transfer_cache(cur, d, kind="text")
@@ -79,11 +77,11 @@ class CacheMixin:
         if not d:
             return
         if os.path.normcase(os.path.abspath(d)) == os.path.normcase(os.path.abspath(cur)):
-            messagebox.showinfo(_T("提示"), "新位置与当前缓存位置相同，无需转移。")
+            messagebox.showinfo(_T("提示"), _T("新位置与当前缓存位置相同，无需转移。"))
             return
         if not messagebox.askyesno(
             "一键转移缓存",
-            f"将正文解析缓存从：\n{cur}\n转移到：\n{d}\n\n转移后立即生效，确定？",
+            _T("将正文解析缓存从：\n{cur}\n转移到：\n{d}\n\n转移后立即生效，确定？").format(cur=cur, d=d),
         ):
             return
         self._do_transfer_cache(cur, d, kind="text")
@@ -92,7 +90,7 @@ class CacheMixin:
         if size_lbl is not None:
             self._update_cache_size_label(size_lbl)
     def _clear_cache(self, size_lbl=None):
-        if not messagebox.askyesno(_T("清除缓存"), "确定清除全部正文解析缓存？\n（下次打开书籍需重新解析，不影响书籍原文件）"):
+        if not messagebox.askyesno(_T("清除缓存"), _T("确定清除全部正文解析缓存？\n（下次打开书籍需重新解析，不影响书籍原文件）")):
             return
         d = self._effective_text_cache_root()
         n = 0
@@ -109,7 +107,7 @@ class CacheMixin:
             pass
         if size_lbl is not None:
             self._update_cache_size_label(size_lbl)
-        messagebox.showinfo(_T("已清除"), f"已清除 {n} 个缓存文件。")
+        messagebox.showinfo(_T("已清除"), _T("已清除 {n} 个缓存文件。").format(n=n))
     def _do_transfer_cache(self, old_dir, new_dir, kind="text"):
         """把 old_dir 的内容移动到 new_dir，并切换对应设置。
 
@@ -139,7 +137,7 @@ class CacheMixin:
                         except Exception:
                             pass
         except Exception as e:
-            messagebox.showerror(_T("转移失败"), f"转移缓存时出错：\n{e}")
+            messagebox.showerror(_T("转移失败"), _T("转移缓存时出错：\n{err}").format(err=e))
             return
         if kind == "text":
             self.settings["cache_dir"] = new
@@ -152,13 +150,13 @@ class CacheMixin:
             threading.Thread(
                 target=lambda: self.tts.tts_cache_calibrate(), daemon=True
             ).start()
-        label=_T("正文解析缓存") if kind == "text" else "音频缓存"
-        messagebox.showinfo(_T("转移完成"), f"{label}已转移到：\n{new}")
+        label = _T("正文解析缓存") if kind == "text" else _T("音频缓存")
+        messagebox.showinfo(_T("转移完成"), label + _T("已转移到：\n{path}").format(path=new))
     def _update_tts_cache_size_label(self, lbl):
         try:
             siz = self.tts.tts_cache_size()
-            loc = "默认位置" if not (self.settings.get("tts_cache_dir") or "") else "自定义位置"
-            lbl.configure(text=f"音频缓存总大小：{self._format_bytes(siz)}（{loc}）")
+            loc = _T("默认位置") if not (self.settings.get("tts_cache_dir") or "") else _T("自定义位置")
+            lbl.configure(text=_T("音频缓存总大小：{size}（{loc}）").format(size=self._format_bytes(siz), loc=loc))
         except Exception:
             pass
     def _open_tts_cache_folder(self):
@@ -167,7 +165,7 @@ class CacheMixin:
             os.makedirs(d, exist_ok=True)
             os.startfile(d)
         except Exception as e:
-            messagebox.showerror(_T("无法打开"), f"打开音频缓存文件夹失败：{e}")
+            messagebox.showerror(_T("无法打开"), _T("打开音频缓存文件夹失败：{e}").format(e=e))
     def _choose_tts_cache_folder(self, path_lbl=None, size_lbl=None):
         """自定义音频缓存文件夹：可顺带一键转移。"""
         cur = self._effective_tts_cache_root()
@@ -178,10 +176,8 @@ class CacheMixin:
         if not d:
             return
         move = messagebox.askyesno(
-            "转移缓存",
-            f"已选择新缓存文件夹：\n{d}\n\n"
-            "是否现在把现有音频缓存转移到新位置？\n"
-            "（选择「否」则仅切换位置，不移动现有文件）",
+            _T("转移缓存"),
+            _T("已选择新缓存文件夹：\n{d}\n\n").format(d=d) + _T("是否现在把现有音频缓存转移到新位置？\n（选择「否」则仅切换位置，不移动现有文件）"),
         )
         if move:
             self._do_transfer_cache(cur, d, kind="audio")
@@ -201,11 +197,11 @@ class CacheMixin:
         if not d:
             return
         if os.path.normcase(os.path.abspath(d)) == os.path.normcase(os.path.abspath(cur)):
-            messagebox.showinfo(_T("提示"), "新位置与当前缓存位置相同，无需转移。")
+            messagebox.showinfo(_T("提示"), _T("新位置与当前缓存位置相同，无需转移。"))
             return
         if not messagebox.askyesno(
-            "一键转移缓存",
-            f"将音频缓存从：\n{cur}\n转移到：\n{d}\n\n转移后立即生效，确定？",
+            _T("一键转移缓存"),
+            _T("将音频缓存从：\n{cur}\n转移到：\n{d}\n\n转移后立即生效，确定？").format(cur=cur, d=d),
         ):
             return
         self._do_transfer_cache(cur, d, kind="audio")
@@ -216,8 +212,8 @@ class CacheMixin:
         self._refresh_bookshelf()
     def _clear_audio_cache(self, size_lbl=None):
         if not messagebox.askyesno(
-            "清除音频缓存",
-            "确定清除全部音频缓存？\n（整本语音缓存文件将被删除，朗读需重新联网合成）",
+            _T("清除音频缓存"),
+            _T("确定清除全部音频缓存？\n（整本语音缓存文件将被删除，朗读需重新联网合成）"),
         ):
             return
         import shutil
@@ -245,7 +241,7 @@ class CacheMixin:
         if size_lbl is not None:
             self._update_tts_cache_size_label(size_lbl)
         self._refresh_bookshelf()
-        messagebox.showinfo(_T("已清除"), f"已清除 {n} 个音频缓存目录。")
+        messagebox.showinfo(_T("已清除"), _T("已清除 {n} 个音频缓存目录。").format(n=n))
     def _update_tts_cache_label(self):
         """右下角显示 Edge 语音预取缓存进度（如 30/30）；本地语音/未朗读时留空。"""
         try:
@@ -253,7 +249,7 @@ class CacheMixin:
         except Exception:
             pr = None
         if pr:
-            self.tts_cache_label.configure(text=f"语音缓存 {pr[0]}/{pr[1]}")
+            self.tts_cache_label.configure(text=_T("语音缓存 {a}/{b}").format(a=pr[0], b=pr[1]))
         else:
             self.tts_cache_label.configure(text="")
     def _on_status_cache_click(self, event=None):
@@ -269,4 +265,4 @@ class CacheMixin:
             self._flash_status(f"已暂停整本缓存（{st['done']}/{st['total']}），点击状态可继续")
         elif st["state"] == "paused":
             self.tts.resume_book_cache(self.current_bid)
-            self._flash_status("已继续整本缓存下载")
+            self._flash_status(_T("已继续整本缓存下载"))

@@ -38,11 +38,11 @@ class BookmarkMixin:
     def _add_bookmark_from_selection(self):
         """阅读区右键：把选中文字存为书签（划线高亮），并弹出备注输入框（默认文本可直接确认）。"""
         if not self.book or not self.current_bid:
-            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), _T("请先从书架打开一本书"))
             return
         sel = self.text.tag_ranges("sel")
         if not sel:
-            messagebox.showinfo(_T("提示"), "请先在阅读区选中要标记的文字，再右键选择『添加书签/划线』")
+            messagebox.showinfo(_T("提示"), _T("请先在阅读区选中要标记的文字，再右键选择『添加书签/划线』"))
             return
         try:
             start, end = sel[0], sel[1]
@@ -50,7 +50,7 @@ class BookmarkMixin:
         except Exception:
             return
         if not text_sel:
-            messagebox.showinfo(_T("提示"), "选中的内容为空")
+            messagebox.showinfo(_T("提示"), _T("选中的内容为空"))
             return
         off = self._idx_to_raw_offset(start)
         off_e = self._idx_to_raw_offset(end)
@@ -62,7 +62,7 @@ class BookmarkMixin:
 
         # 备注输入框：默认文本 = 选中文字前 30 字，用户可直接点“确定”
         dlg = tk.Toplevel(self.root)
-        dlg.title("添加书签")
+        dlg.title(_T("添加书签"))
         dlg.geometry("460x240")
         dlg.resizable(False, False)
         dlg.transient(self.root)
@@ -77,7 +77,7 @@ class BookmarkMixin:
         ent.select_range(0, "end")
         ent.focus_set()
         preview = text_sel[:80] + ("…" if len(text_sel) > 80 else "")
-        tk.Label(dlg, text=f"选中内容：{preview}", bg=self._dialog_bg(), fg="#888888",
+        tk.Label(dlg, text=_T("选中内容：{preview}").format(preview=preview), bg=self._dialog_bg(), fg="#888888",
                  font=("微软雅黑", 9), wraplength=420, justify="left").pack(anchor="w", padx=16, pady=(8, 0))
 
         def do_save(event=None):
@@ -96,7 +96,7 @@ class BookmarkMixin:
                 pass
             self._apply_bookmark_tags()
             self._fill_bookmark_panel(keep=True)
-            self._flash_status("已添加书签/划线")
+            self._flash_status(_T("已添加书签/划线"))
             try:
                 self.text.tag_remove("sel", "1.0", "end")
             except Exception:
@@ -161,11 +161,11 @@ class BookmarkMixin:
         try:
             self.chapter_list.delete(0, "end")
             if not self.book or not self.current_bid:
-                self.chapter_list.insert("end", "（无书签）")
+                self.chapter_list.insert("end", _T("（无书签）"))
                 return
             bms = self.storage.get_bookmarks(self.current_bid)
             if not bms:
-                self.chapter_list.insert("end", "（暂无书签，选中文字后右键添加）")
+                self.chapter_list.insert("end", _T("（暂无书签，选中文字后右键添加）"))
                 return
             self._bookmark_meta = bms
             for i, bm in enumerate(bms):
@@ -178,7 +178,7 @@ class BookmarkMixin:
                     title = self.book.chapters[ci].title.strip() if 0 <= ci < len(self.book.chapters) else ""
                 except Exception:
                     pass
-                self.chapter_list.insert("end", f"〔{title or ('第' + str(ci + 1) + '章')}〕 {note}")
+                self.chapter_list.insert("end", _T("〔{title}〕 {note}").format(title=title or _T("第 {n} 章").format(n=ci + 1), note=note))
         except Exception:
             pass
 
@@ -207,7 +207,7 @@ class BookmarkMixin:
             ci = max(0, min(int(bm.get("chapter_idx", 0)), len(self.book.chapters) - 1))
             off = int(bm.get("offset", 0))
             self._goto_chapter(ci, off)
-            self._flash_status("已跳转到书签位置")
+            self._flash_status(_T("已跳转到书签位置"))
             # 书签高亮钉到窗口第一行
             try:
                 bms2 = self.storage.get_bookmarks(self.current_bid)
@@ -252,6 +252,6 @@ class BookmarkMixin:
                 self.storage.remove_bookmark(self.current_bid, bm.get("id"))
                 self._fill_bookmark_panel()
                 self._apply_bookmark_tags()
-                self._flash_status("已删除书签")
+                self._flash_status(_T("已删除书签"))
         except Exception:
             pass

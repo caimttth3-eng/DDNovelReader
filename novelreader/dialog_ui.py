@@ -42,7 +42,7 @@ class DialogMixin:
         from . import version_info
 
         top = tk.Toplevel(self.root)
-        top.title(f"关于 {version_info.APP_NAME}")
+        top.title(f"{_T('关于')} {version_info.APP_NAME}")
         top.geometry("700x800")
         top.minsize(560, 620)
         top.transient(self.root)
@@ -129,13 +129,15 @@ class DialogMixin:
         tk.Label(lang_row, text=_T("界面语言"), fg="#555555", bg=_about_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         lang_cb = ttk.Combobox(lang_row, state="readonly", width=10,
-                               values=["中文", "English"])
+                               values=["中文", "English", "日本語", "한국어"])
         lang_cb.pack(side="left")
         from .i18n import get_lang as _get_lang
-        lang_cb.set("English" if _get_lang() == "en" else "中文")
+        _lang_map = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
+        lang_cb.set(_lang_map.get(_get_lang(), "中文"))
         def _on_lang(e=None):
             v = lang_cb.get()
-            self.storage.set_setting("ui_lang", "en" if v == "English" else "zh")
+            _rev = {n: c for c, n in _lang_map.items()}
+            self.storage.set_setting("ui_lang", _rev.get(v, "zh"))
             messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
         lang_cb.bind("<<ComboboxSelected>>", _on_lang)
 
@@ -162,8 +164,10 @@ class DialogMixin:
         keys.configure(yscrollcommand=ksb.set)
         ksb.pack(side="right", fill="y")
         keys.pack(side="left", fill="both", expand=True)
-        for k, desc, desc_en in version_info.SHORTCUTS:
-            keys.insert("end", f"{k}\n    {desc} / {desc_en}\n\n")
+        from .i18n import get_lang as _gl_keys
+        _col = {"zh": 1, "en": 2, "ja": 3, "ko": 4}.get(_gl_keys(), 2)
+        for _item in version_info.SHORTCUTS:
+            keys.insert("end", f"{_item[0]}\n    {_item[_col]}\n\n")
         keys.configure(state="disabled")
 
         # —— 缓存管理（可滚动卡片式布局） ——
@@ -241,7 +245,7 @@ class DialogMixin:
         path_lbl, size_lbl, loc_lbl1 = _make_cache_card(
             cache_inner,
             title=_T("正文解析缓存"),
-            subtitle="书籍分章解析结果，删除后下次打开需重新解析（不影响原文件）。",
+            subtitle=_T("书籍分章解析结果，删除后下次打开需重新解析（不影响原文件）。"),
             icon="📄",
             accent="#2b6cb0",
             kind="text",
@@ -251,7 +255,7 @@ class DialogMixin:
         tts_path_lbl, tts_size_lbl, loc_lbl2 = _make_cache_card(
             cache_inner,
             title=_T("音频缓存（整本语音）"),
-            subtitle="整本语音合成缓存，体积较大，建议放到非 C 盘。",
+            subtitle=_T("整本语音合成缓存，体积较大，建议放到非 C 盘。"),
             icon="🔊",
             accent="#b00020",
             kind="audio",
@@ -264,8 +268,8 @@ class DialogMixin:
         def _refresh_sizes():
             self._update_cache_size_label(size_lbl)
             self._update_tts_cache_size_label(tts_size_lbl)
-            loc_lbl1.configure(text=_T("自定义位置") if self.settings.get("cache_dir") else "默认位置")
-            loc_lbl2.configure(text=_T("自定义位置") if self.settings.get("tts_cache_dir") else "默认位置")
+            loc_lbl1.configure(text=_T("自定义位置") if self.settings.get("cache_dir") else _T("默认位置"))
+            loc_lbl2.configure(text=_T("自定义位置") if self.settings.get("tts_cache_dir") else _T("默认位置"))
         top.after(120, _refresh_sizes)
 
         self._about_win = top
@@ -273,7 +277,7 @@ class DialogMixin:
     def _open_skin_picker(self):
         """主题选择：六套控件风格（A-F），点击即切换，即时生效。"""
         top = tk.Toplevel(self.root)
-        top.title("主题选择")
+        top.title(_T("主题选择"))
         top.geometry("560x440")
         top.minsize(480, 380)
         top.transient(self.root)
@@ -317,9 +321,9 @@ class DialogMixin:
             tk.Label(prev, text="Aa", bg=c["bg"], fg=c["fg"],
                      font=("微软雅黑", 11, "bold"), cursor="hand2").pack(side="left", padx=(4, 0))
 
-            tk.Label(card, text=name, bg=c["field"], fg=c["fg"],
+            tk.Label(card, text=_T(name), bg=c["field"], fg=c["fg"],
                      font=("微软雅黑", 10, "bold"), cursor="hand2").pack(pady=(6, 2))
-            tk.Label(card, text=("✓ 当前" if is_cur else f"按钮 {c['btn']}"),
+            tk.Label(card, text=(_T("✓ 当前") if is_cur else f"{_T('按钮')} {c['btn']}"),
                      bg=c["field"], fg=(c["accent"] if is_cur else c["muted"]),
                      font=("微软雅黑", 8), cursor="hand2").pack(pady=(0, 6))
 
@@ -405,14 +409,14 @@ class DialogMixin:
         try:
             root = self._effective_text_cache_root()
             siz = dir_size(root)
-            loc = "默认位置" if not (self.settings.get("cache_dir") or "") else "自定义位置"
-            lbl.configure(text=f"缓存总大小：{self._format_bytes(siz)}（{loc}）")
+            loc = _T("默认位置") if not (self.settings.get("cache_dir") or "") else _T("自定义位置")
+            lbl.configure(text=_T("缓存总大小：{size}（{loc}）").format(size=self._format_bytes(siz), loc=loc))
         except Exception:
             pass
     def _open_timer_dialog(self):
         """定时停止播放：以分钟为单位自填数字，到点自动停止。"""
         dlg = tk.Toplevel(self.root)
-        dlg.title("定时停止朗读")
+        dlg.title(_T("定时停止朗读"))
         dlg.geometry("340x180")
         dlg.resizable(False, False)
         dlg.transient(self.root)
@@ -437,7 +441,7 @@ class DialogMixin:
             self._timer_running = False
             self._timer_deadline = None
             self.timer_btn.configure(text=_T("定时"))
-            self._flash_status("已取消定时")
+            self._flash_status(_T("已取消定时"))
             dlg.destroy()
 
         ops = tk.Frame(dlg)
@@ -458,7 +462,7 @@ class DialogMixin:
                     self._flash_status(_T("定时时间到，已停止朗读（本次定时 {mins} 分钟）").format(mins=mins))
                 else:
                     m, s = divmod(int(remain), 60)
-                    self.timer_btn.configure(text=f"定时 {m:02d}:{s:02d}")
+                    self.timer_btn.configure(text=_T("定时 {m}:{s}").format(m=f"{m:02d}", s=f"{s:02d}"))
             else:
                 self.timer_btn.configure(text=_T("定时"))
         except Exception:
@@ -470,16 +474,16 @@ class DialogMixin:
     def _open_percent_dialog(self):
         """点击右下角百分比：弹窗手动输入百分比并跳转。"""
         if not self.book:
-            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), _T("请先从书架打开一本书"))
             return
         dlg = tk.Toplevel(self.root)
-        dlg.title("跳转到进度")
+        dlg.title(_T("跳转到进度"))
         dlg.geometry("300x150")
         dlg.resizable(False, False)
         dlg.transient(self.root)
         self._center_window(dlg)
         cur = self._compute_percent(self.chapter_idx, self.char_offset)
-        tk.Label(dlg, text=f"当前进度 {cur:.1f}%，输入目标百分比（0~100）：",
+        tk.Label(dlg, text=_T("当前进度 {cur}%，输入目标百分比（0~100）：").format(cur=f"{cur:.1f}"),
                  font=("微软雅黑", 10)).pack(pady=(16, 6))
         var = tk.DoubleVar(value=round(cur, 1))
         sp = tk.Spinbox(dlg, from_=0.0, to=100.0, increment=0.1, textvariable=var, width=10,
@@ -511,4 +515,4 @@ class DialogMixin:
         off = int(target - self.book.cum[ci])
         off = max(0, min(off, len(self.book.chapters[ci].content)))
         self._goto_chapter(ci, off)
-        self._flash_status(f"已跳转到全书 {pct:.1f}%")
+        self._flash_status(_T("已跳转到全书 {pct}%").format(pct=f"{pct:.1f}"))

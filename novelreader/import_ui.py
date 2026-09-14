@@ -82,7 +82,7 @@ class ImportMixin:
         if not t:
             t = self._snippet_under_cursor()
         if not t:
-            messagebox.showinfo(_T("提示"), "请先在阅读区选中文字，或右键点击某一行。")
+            messagebox.showinfo(_T("提示"), _T("请先在阅读区选中文字，或右键点击某一行。"))
             return
         q = urllib.parse.quote(t)
         urls = {
@@ -170,7 +170,7 @@ class ImportMixin:
             return paths
         # 弹确认窗口
         dlg = tk.Toplevel(self.root)
-        dlg.title("文件较大")
+        dlg.title(_T("文件较大"))
         dlg.geometry("480x220")
         dlg.resizable(False, False)
         dlg.transient(self.root)
@@ -180,7 +180,7 @@ class ImportMixin:
         except Exception:
             pass
         names = "\n".join(f"  · {os.path.basename(p)} ({sz:.1f}MB)" for p, sz in large)
-        tk.Label(dlg, text=f"以下 {len(large)} 个文件超过 {threshold_mb}MB：",
+        tk.Label(dlg, text=_T("以下 {n} 个文件超过 {mb}MB：").format(n=len(large), mb=threshold_mb),
                  font=("微软雅黑", 10, "bold")).pack(pady=(14, 6), anchor="w", padx=16)
         tk.Label(dlg, text=names, fg="#444444", font=("微软雅黑", 9),
                  justify="left", anchor="w").pack(padx=20, anchor="w")
@@ -212,19 +212,19 @@ class ImportMixin:
             try:
                 content = self._load_book(path)
             except Exception as e:
-                messagebox.showerror(_T("无法打开"), f"读取缓存失败：\n{e}")
+                messagebox.showerror(_T("无法打开"), _T("读取缓存失败：\n{e}").format(e=e))
                 return
             self._save_import(content, path)
             self._refresh_bookshelf()
             self.open_book(bid)
-            self._flash_status(f"已覆盖「{content.title}」（沿用已有解析）")
+            self._flash_status(_T("已覆盖「{title}」（沿用已有解析）").format(title=content.title))
             return
         # 首次导入：后台线程 + 进度条窗口（v1.93：单本也弹进度窗，解析分章不卡 UI）
         self._import_many([path])
     def _ask_duplicate(self, title):
         """重复书籍确认框。返回 None=取消 / "overwrite"=覆盖 / "reparse"=重新预处理。"""
         dlg = tk.Toplevel(self.root)
-        dlg.title("重复书籍")
+        dlg.title(_T("重复书籍"))
         dlg.geometry("460x200")
         dlg.resizable(False, False)
         dlg.transient(self.root)
@@ -234,7 +234,7 @@ class ImportMixin:
         except Exception:
             pass
         result = [None]
-        tk.Label(dlg, text=f"「{title}」已在书架中", font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
+        tk.Label(dlg, text=_T("「{title}」已在书架中").format(title=title), font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
         tk.Label(dlg, text=_T("覆盖：沿用已有分章解析，立即完成；\n重新预处理：丢弃旧解析重新分章（长篇耗时较久）。"),
                  fg="#666666", font=("微软雅黑", 9)).pack(pady=(2, 8))
         ops = tk.Frame(dlg)
@@ -249,7 +249,7 @@ class ImportMixin:
     def _reprocess_book(self, path, bid):
         """重新预处理：后台线程强制重新解析分章，带进度窗，避免百万字假死。"""
         win = tk.Toplevel(self.root)
-        win.title("重新预处理")
+        win.title(_T("重新预处理"))
         win.geometry("380x130")
         win.resizable(False, False)
         win.transient(self.root)
@@ -288,7 +288,7 @@ class ImportMixin:
                 self._save_import(content, path)
                 self._refresh_bookshelf()
                 self.open_book(bid)
-                self._flash_status(f"已重新预处理「{content.title}」")
+                self._flash_status(_T("已重新预处理「{title}」").format(title=content.title))
             else:
                 messagebox.showerror(_T("解析失败"), msg[1])
 
@@ -337,7 +337,7 @@ class ImportMixin:
             if choice == "reparse":
                 force_reparse = {b for _, b in dups}
         win = tk.Toplevel(self.root)
-        win.title("正在导入")
+        win.title(_T("正在导入"))
         win.geometry("400x140")
         win.resizable(False, False)
         win.transient(self.root)
@@ -378,7 +378,7 @@ class ImportMixin:
     def _ask_duplicate_batch(self, count):
         """批量导入中重复书籍的确认框。返回 None=取消 / "overwrite" / "reparse"。"""
         dlg = tk.Toplevel(self.root)
-        dlg.title("重复书籍")
+        dlg.title(_T("重复书籍"))
         dlg.geometry("460x190")
         dlg.resizable(False, False)
         dlg.transient(self.root)
@@ -388,7 +388,7 @@ class ImportMixin:
         except Exception:
             pass
         result = [None]
-        tk.Label(dlg, text=f"所选文件中有 {count} 本已在书架中", font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
+        tk.Label(dlg, text=_T("所选文件中有 {n} 本已在书架中").format(n=count), font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
         tk.Label(dlg, text=_T("全部覆盖：沿用已有分章解析，立即完成；\n全部重新预处理：丢弃旧解析重新分章（长篇耗时较久）。"),
                  fg="#666666", font=("微软雅黑", 9)).pack(pady=(2, 8))
         ops = tk.Frame(dlg)
@@ -419,7 +419,7 @@ class ImportMixin:
                         self._first_imported_bid = msg[1]
                 prog_var.set(prog_var.get() + 1)
                 info_lbl.configure(text=f"{int(prog_var.get())} / {total}")
-                name_lbl.configure(text=msg[1] if msg[0] == "ok" else f"失败：{msg[1]}：{msg[2]}")
+                name_lbl.configure(text=msg[1] if msg[0] == "ok" else _T("失败：{a}：{b}").format(a=msg[1], b=msg[2]))
         except queue.Empty:
             pass
         self.root.after(80, lambda: self._poll_import(win, prog_var, info_lbl, name_lbl, total))
@@ -430,10 +430,10 @@ class ImportMixin:
         meta = self.storage.get_book(bid)
         if not meta:
             return
-        label=_T("删除文件") if clear_cache else "删除书籍"
-        tip = ("（从书架移除并清空缓存，不删除原文件）" if clear_cache
-               else "（从书架移除，保留缓存，不删除原文件）")
-        if not messagebox.askyesno(label, f"确定{label}《{meta.get('title','')}》？\n{tip}"):
+        label = _T("删除文件") if clear_cache else _T("删除书籍")
+        tip = (_T("（从书架移除并清空缓存，不删除原文件）") if clear_cache
+               else _T("（从书架移除，保留缓存，不删除原文件）"))
+        if not messagebox.askyesno(label, _T("确定{label}《{title}》？\n{tip}").format(label=label, title=meta.get("title", ""), tip=tip)):
             return
         self.tts.stop()
         self.storage.remove_book(bid)

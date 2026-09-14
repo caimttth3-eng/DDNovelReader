@@ -70,7 +70,7 @@ class ShelfMixin:
             rows.append({
                 "id": b["id"],
                 "progress": pct,
-                "title": b.get("title", "未命名"),
+                "title": b.get("title", _T("未命名")),
                 "size": csize,
                 "size_s": size_s,
                 "time": ts,
@@ -102,7 +102,7 @@ class ShelfMixin:
                 pass
         if not rows:
             self.shelf_tree.insert("", "end", iid="__empty__",
-                                    values=("", "（书架为空，点击『添加书籍』导入）", "", ""))
+                                    values=("", _T("（书架为空，点击『添加书籍』导入）"), "", ""))
         # 后台异步计算缺失的缓存大小
         self._refresh_shelf_sizes_async()
     def _shelf_sort(self, col):
@@ -140,7 +140,7 @@ class ShelfMixin:
             self.shelf_tree.selection_set(iid)
             multi = False
         # 多选时：打开书籍、复制原文件、复制书名 变灰
-        self.shelf_menu.entryconfigure("打开书籍", state="disabled" if multi else "normal")
+        self.shelf_menu.entryconfigure(_T("打开书籍"), state="disabled" if multi else "normal")
         # 单选时：复制原文件 仅当源文件（原路径/备份源）可用，否则置灰
         src_ok = False
         if not multi:
@@ -150,8 +150,8 @@ class ShelfMixin:
                 sp = smeta.get("path", "")
                 sbak = smeta.get("source_bak", "")
                 src_ok = (sp and os.path.exists(sp)) or (sbak and os.path.exists(sbak))
-        self.shelf_menu.entryconfigure("复制原文件", state="disabled" if (multi or not src_ok) else "normal")
-        self.shelf_menu.entryconfigure("复制书名", state="disabled" if multi else "normal")
+        self.shelf_menu.entryconfigure(_T("复制原文件"), state="disabled" if (multi or not src_ok) else "normal")
+        self.shelf_menu.entryconfigure(_T("复制书名"), state="disabled" if multi else "normal")
         try:
             self.shelf_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -170,12 +170,12 @@ class ShelfMixin:
             if bak and os.path.exists(bak):
                 path = bak
             else:
-                messagebox.showinfo(_T("提示"), "原文件不存在或已被移动。")
+                messagebox.showinfo(_T("提示"), _T("原文件不存在或已被移动。"))
                 return
         if _copy_files_to_clipboard([path]):
-            messagebox.showinfo(_T("已复制"), "原文件已复制到剪贴板，可在文件管理器中直接粘贴（Ctrl+V）。")
+            messagebox.showinfo(_T("已复制"), _T("原文件已复制到剪贴板，可在文件管理器中直接粘贴（Ctrl+V）。"))
         else:
-            messagebox.showerror(_T("失败"), "复制到剪贴板失败。")
+            messagebox.showerror(_T("失败"), _T("复制到剪贴板失败。"))
     def _copy_book_title(self):
         bid = self._selected_bid()
         if not bid:
@@ -185,7 +185,7 @@ class ShelfMixin:
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(meta.get("title", ""))
-        messagebox.showinfo(_T("已复制"), f"已复制书名：{meta.get('title', '')}")
+        messagebox.showinfo(_T("已复制"), _T("已复制书名：{title}").format(title=meta.get("title", "")))
     def _delete_audio_cache(self, bid):
         """删除某本书的全部音频缓存目录。"""
         try:
@@ -221,14 +221,14 @@ class ShelfMixin:
         """一键备份：把书架 + 进度 + 设置 + 书签（library.json）导出到用户选择的文件。"""
         src = self.storage.path
         if not os.path.exists(src):
-            messagebox.showinfo(_T("提示"), "暂无数据可备份")
+            messagebox.showinfo(_T("提示"), _T("暂无数据可备份"))
             return
         default_name = f"多多朗读备份_{time.strftime('%Y%m%d_%H%M%S')}.json"
         try:
             dest = filedialog.asksaveasfilename(
                 defaultextension=".json",
                 initialfile=default_name,
-                filetypes=[("JSON 备份文件", "*.json")],
+                filetypes=[(_T("JSON 备份文件"), "*.json")],
             )
         except Exception:
             return
@@ -238,9 +238,9 @@ class ShelfMixin:
             import shutil
             shutil.copyfile(src, dest)
             messagebox.showinfo(_T("备份成功"),
-                                f"已备份书架、阅读进度、设置与书签到：\n{dest}\n\n提示：缓存体积较大，不包含在备份内。")
+                                _T("已备份书架、阅读进度、设置与书签到：\n{dest}\n\n提示：缓存体积较大，不包含在备份内。").format(dest=dest))
         except Exception as e:
-            messagebox.showerror(_T("备份失败"), f"备份失败：{e}")
+            messagebox.showerror(_T("备份失败"), _T("备份失败：{e}").format(e=e))
 
     def _restore_library(self):
         """一键还原：从备份文件恢复书架 + 进度 + 设置 + 书签。
@@ -250,13 +250,13 @@ class ShelfMixin:
         try:
             src = filedialog.askopenfilename(
                 title=_T("选择备份文件"),
-                filetypes=[("JSON 备份文件", "*.json")],
+                filetypes=[(_T("JSON 备份文件"), "*.json")],
             )
         except Exception:
             return
         if not src:
             return
-        if not messagebox.askyesno(_T("确认还原"), "还原将覆盖当前的书架、阅读进度、设置与书签，是否继续？"):
+        if not messagebox.askyesno(_T("确认还原"), _T("还原将覆盖当前的书架、阅读进度、设置与书签，是否继续？")):
             return
         try:
             import json
@@ -264,7 +264,7 @@ class ShelfMixin:
             with open(src, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict) or "books" not in data:
-                raise ValueError("备份文件格式不正确（缺少 books 字段）")
+                raise ValueError(_T("备份文件格式不正确（缺少 books 字段）"))
             cur_bak = self.storage.path + ".pre_restore"
             try:
                 if os.path.exists(self.storage.path):
@@ -293,9 +293,9 @@ class ShelfMixin:
                     self.open_book(last)
                 except Exception:
                     pass
-            msg = "已从备份还原书架、阅读进度、设置与书签。"
+            msg = _T("已从备份还原书架、阅读进度、设置与书签。")
             if cur_bak:
-                msg += f"\n\n还原前数据已自动备份到：\n{cur_bak}"
+                msg += "\n\n" + _T("还原前数据已自动备份到：\n{path}").format(path=cur_bak)
             messagebox.showinfo(_T("还原成功"), msg)
         except Exception as e:
-            messagebox.showerror(_T("还原失败"), f"还原失败：{e}\n原数据未受影响。")
+            messagebox.showerror(_T("还原失败"), _T("还原失败：{e}\n原数据未受影响。").format(e=e))

@@ -121,7 +121,7 @@ class ReaderMixin:
         self.chapter_idx = max(0, min(int(prog.get("chapter_idx", 0)), len(self.book.chapters) - 1))
         self.char_offset = int(prog.get("char_offset", 0))
         self.char_offset = max(0, min(self.char_offset, len(self.book.chapters[self.chapter_idx].content)))
-        self.root.title(f"{self.book.title} - 多多朗读 v{__version__}")
+        self.root.title(f"{self.book.title} - " + _T("多多朗读 v{ver}").format(ver=__version__))
         self.title_label.configure(text=self.book.title)
         self._populate_chapters()
         self._render_chapter()
@@ -158,7 +158,7 @@ class ReaderMixin:
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         # 插入章节标题（用户翻章时能明显看到当前章节）
-        title_text = ch.title.strip() if ch.title else f"第 {self.chapter_idx + 1} 章"
+        title_text = ch.title.strip() if ch.title else _T("第 {n} 章").format(n=self.chapter_idx + 1)
         self.text.insert("1.0", title_text + "\n\n", "chapter_title")
         # 记录标题偏移量（标题+两个换行）
         self._title_char_len = len(title_text) + 2
@@ -187,7 +187,7 @@ class ReaderMixin:
         self.total_label.configure(text="")
         self.tts_cache_label.configure(text="")
         self.progress_var.set(0)
-        self.root.title(f"多多朗读 v{__version__}")
+        self.root.title(_T("多多朗读 v{ver}").format(ver=__version__))
     def _compute_percent(self, ci, off):
         if not self.book or self.book.total_chars <= 0:
             return 0.0
@@ -199,8 +199,8 @@ class ReaderMixin:
         pct = self._compute_percent(self.chapter_idx, self.char_offset)
         self.progress_var.set(pct)
         self.percent_label.configure(text=f"{pct:.1f}%")
-        self.pos_label.configure(text=f"第 {self.chapter_idx + 1} 章 / 共 {len(self.book.chapters)} 章")
-        self.total_label.configure(text=f"总字数 {self.book.total_chars:,}")
+        self.pos_label.configure(text=_T("第 {n} 章 / 共 {total} 章").format(n=self.chapter_idx + 1, total=len(self.book.chapters)))
+        self.total_label.configure(text=_T("总字数 {n:,}").format(n=self.book.total_chars))
     def _on_seek_press(self, event=None):
         self._seeking = True
         self._pending_seek_pct = None
@@ -306,7 +306,7 @@ class ReaderMixin:
     def _read_from_paragraph(self):
         """阅读区右键：从光标所在段落起点开始朗读。"""
         if not self.book:
-            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), _T("请先从书架打开一本书"))
             return
         idx = getattr(self, "_ctx_index", None)
         if not idx:
@@ -350,7 +350,7 @@ class ReaderMixin:
         if not self.tts.is_active():
             self.tts.start(self.book, self.chapter_idx, off)
             self._set_tts_ui("playing")
-        self._flash_status("已从该段开始朗读")
+        self._flash_status(_T("已从该段开始朗读"))
     def _display_col_to_raw_offset(self, col):
         """模式3：显示列号（删除换行后）→ 原文偏移（不回退段）。
 
@@ -471,7 +471,7 @@ class ReaderMixin:
         elif t == "error":
             # 非阻塞提示。注意：Edge 联网失败会回退本地语音并继续朗读，
             # 此时不能把按钮重置为“开始朗读”，真正的结束由 “stopped” 事件统一处理。
-            self._flash_status(evt.get("message", "朗读出错"))
+            self._flash_status(evt.get("message", _T("朗读出错")))
     def _transformed_pos(self, content, off):
         """把原始正文的字符偏移映射到渲染文本（压缩空行后）中的 (行, 列)。
 

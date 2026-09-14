@@ -5,6 +5,15 @@ APP_NAME = "多多朗读"
 
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
+    {
+        "version": "2.0V1",
+        "date": "2026-09-14",
+        "changes": [
+            "四语言界面：中 / 英 / 日 / 韩全量翻译（快捷键说明、缓存管理、主题切换等全覆盖）",
+            "语音下拉框按界面语言过滤：英语界面显示英语 Edge 音色（US/UK），日语 / 韩语界面显示日韩音色",
+        ],
+    },
+
 
     {
         "version": "2.0",
@@ -270,35 +279,35 @@ VERSION_HISTORY = [
 
 SHORTCUTS = [
     # 文件 / 书架
-    ("Ctrl+O", "添加书籍", "Add book"),
-    ("Ctrl+B", "收起 / 展开书架", "Collapse / expand shelf"),
+    ("Ctrl+O", "添加书籍", "Add book", "書籍を追加", "책 추가"),
+    ("Ctrl+B", "收起 / 展开书架", "Collapse / expand shelf", "本棚を閉じる / 開く", "서가 접기 / 펼치기"),
     # 导航 / 视图
-    ("Ctrl+L", "打开 / 收起目录", "Open / close TOC"),
-    ("Ctrl+PageUp / Ctrl+PageDown", "上一章 / 下一章", "Previous / next chapter"),
-    ("F11 / Alt+Enter", "进入 / 退出全屏", "Enter / exit fullscreen"),
-    ("Esc", "退出全屏", "Exit fullscreen"),
+    ("Ctrl+L", "打开 / 收起目录", "Open / close TOC", "目次を開く / 閉じる", "목차 열기 / 닫기"),
+    ("Ctrl+PageUp / Ctrl+PageDown", "上一章 / 下一章", "Previous / next chapter", "前の章 / 次の章", "이전 장 / 다음 장"),
+    ("F11 / Alt+Enter", "进入 / 退出全屏", "Enter / exit fullscreen", "全画面に入る / 終了", "전체 화면 진입 / 종료"),
+    ("Esc", "退出全屏", "Exit fullscreen", "全画面を終了", "전체 화면 종료"),
     # 朗读
-    ("Space / Ctrl+P", "开始 / 暂停 / 继续朗读", "Start / pause / resume reading"),
-    ("Ctrl+S", "停止朗读", "Stop reading"),
-    ("Ctrl+R", "从当前屏顶部段落开始朗读", "Read from top of screen"),
+    ("Space / Ctrl+P", "开始 / 暂停 / 继续朗读", "Start / pause / resume reading", "朗読を開始 / 一時停止 / 再開", "낭독 시작 / 일시정지 / 재개"),
+    ("Ctrl+S", "停止朗读", "Stop reading", "朗読を停止", "낭독 중지"),
+    ("Ctrl+R", "从当前屏顶部段落开始朗读", "Read from top of screen", "画面最上部の段落から朗読", "화면 상단 단락부터 낭독"),
     # 排版
-    ("+ / -（主键盘或小键盘）", "增大 / 减小字号", "Increase / decrease font size"),
-    ("0", "重置字号为默认", "Reset font size to default"),
-    ("Ctrl++ / Ctrl+- / Ctrl+0", "增大 / 减小 / 重置字号（组合键兼容）", "Font size up / down / reset (compat)"),
-    ("Ctrl+Alt+Plus / Ctrl+Alt+Minus", "增大 / 减小行距", "Increase / decrease line spacing"),
-    ("Ctrl+M", "循环切换空行压缩模式（不压缩 / 合并 / 清理）", "Cycle blank-line mode (keep / merge / flatten)"),
+    ("+ / -（主键盘或小键盘）", "增大 / 减小字号", "Increase / decrease font size", "文字サイズを拡大 / 縮小", "글자 크기 확대 / 축소"),
+    ("0", "重置字号为默认", "Reset font size to default", "文字サイズを既定に戻す", "글자 크기 기본값으로 초기화"),
+    ("Ctrl++ / Ctrl+- / Ctrl+0", "增大 / 减小 / 重置字号（组合键兼容）", "Font size up / down / reset (compat)", "文字サイズ拡大 / 縮小 / リセット（組合せ対応）", "글자 크기 확대 / 축소 / 초기화(조합키 지원)"),
+    ("Ctrl+Alt+Plus / Ctrl+Alt+Minus", "增大 / 减小行距", "Increase / decrease line spacing", "行間を広げる / 狭める", "줄 간격 넓히기 / 좁히기"),
+    ("Ctrl+M", "循环切换空行压缩模式（不压缩 / 合并 / 清理）", "Cycle blank-line mode (keep / merge / flatten)", "空行モードを切替（圧縮なし / 結合 / クリア）", "빈 줄 모드 전환(압축 안 함 / 합치기 / 정리)"),
     # 朗读参数
-    ("Ctrl+↑ / Ctrl+↓", "增大 / 减小音量", "Increase / decrease volume"),
-    ("Ctrl+← / Ctrl+→", "减慢 / 加快语速", "Slow down / speed up rate"),
+    ("Ctrl+↑ / Ctrl+↓", "增大 / 减小音量", "Increase / decrease volume", "音量を上げる / 下げる", "음량 높이기 / 낮추기"),
+    ("Ctrl+← / Ctrl+→", "减慢 / 加快语速", "Slow down / speed up rate", "速度を遅く / 速く", "속도 늦추기 / 빠르게"),
     # 书页配色
-    ("Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4", "书页配色：白天 / 护眼 / 夜间 / 米黄", "Page theme: Day / Eye / Night / Cream"),
+    ("Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4", "书页配色：白天 / 护眼 / 夜间 / 米黄", "Page theme: Day / Eye / Night / Cream", "ページ配色：昼 / 目に優しい / 夜 / クリーム", "페이지 색상: 낮 / 눈 보호 / 밤 / 크림"),
     # 功能
-    ("Ctrl+D", "整本缓存（下载管理器）", "Download manager"),
-    ("Ctrl+T", "定时停止朗读", "Timer stop"),
+    ("Ctrl+D", "整本缓存（下载管理器）", "Download manager", "全巻キャッシュ（ダウンロードマネージャー）", "전체 캐시(다운로드 관리자)"),
+    ("Ctrl+T", "定时停止朗读", "Timer stop", "タイマーで朗読停止", "타이머로 낭독 중지"),
     # 阅读区
-    ("↑ / ↓", "阅读区上下滚动", "Scroll up / down"),
-    ("PageUp / PageDown", "阅读区上一页 / 下一页", "Previous / next page"),
-    ("Home / End", "跳到章节开头 / 结尾", "Jump to chapter start / end"),
+    ("↑ / ↓", "阅读区上下滚动", "Scroll up / down", "読書エリアを上下スクロール", "읽기 영역 위아래 스크롤"),
+    ("PageUp / PageDown", "阅读区上一页 / 下一页", "Previous / next page", "前のページ / 次のページ", "이전 페이지 / 다음 페이지"),
+    ("Home / End", "跳到章节开头 / 结尾", "Jump to chapter start / end", "章の先頭 / 末尾へ移動", "장 시작 / 끝으로 이동"),
 ]
 
 

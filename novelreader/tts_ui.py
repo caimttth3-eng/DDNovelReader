@@ -40,7 +40,7 @@ class TtsMixin:
     def _tts_toggle(self):
         """开始 / 暂停 / 继续 切换。"""
         if not self.book:
-            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), _T("请先从书架打开一本书"))
             return
         if self.tts.is_playing():
             self.tts.pause()
@@ -111,31 +111,31 @@ class TtsMixin:
         state, done, total = st["state"], st["done"], st["total"]
         if state == "caching":
             pct = (done / total * 100) if total else 0
-            self.tts_cache_btn.configure(text=f"缓存中 {pct:.0f}%")
+            self.tts_cache_btn.configure(text=_T("缓存中 {pct}%").format(pct=f"{pct:.0f}"))
             self.book_cache_label.configure(
-                text=f"整本缓存 {done}/{total}（点击暂停）",
+                text=_T("整本缓存 {done}/{total}（点击暂停）").format(done=done, total=total),
                 fg="#8a5a00",
                 font=("微软雅黑", 9),
             )
         elif state == "paused":
             pct = (done / total * 100) if total else 0
-            self.tts_cache_btn.configure(text=f"已暂停 {pct:.0f}%")
+            self.tts_cache_btn.configure(text=_T("已暂停 {pct}%").format(pct=f"{pct:.0f}"))
             # 暂停：醒目加粗 + 高对比色提示
             self.book_cache_label.configure(
-                text=f"⏸ 缓存已暂停 {done}/{total}（点击继续）",
+                text=_T("⏸ 缓存已暂停 {done}/{total}（点击继续）").format(done=done, total=total),
                 fg="#c0392b",
                 font=("微软雅黑", 9, "bold"),
             )
         elif state == "done":
             self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(
-                text=f"整本缓存完成 {total} 句",
+                text=_T("整本缓存完成 {total} 句").format(total=total),
                 fg="#8a5a00",
                 font=("微软雅黑", 9),
             )
             if not getattr(self, "_book_cache_done_flashed", False):
                 self._book_cache_done_flashed = True
-                self._flash_status("整本语音缓存完成，朗读将零网络延迟")
+                self._flash_status(_T("整本语音缓存完成，朗读将零网络延迟"))
         elif state == "cancelled":
             self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))

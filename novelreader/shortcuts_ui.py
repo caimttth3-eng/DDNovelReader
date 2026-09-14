@@ -181,9 +181,9 @@ class ShortcutsMixin:
                     chap = self.book.chapters[self.chapter_idx].title
                     pct = self._compute_percent(self.chapter_idx, self.char_offset)
                 self._ov_time.configure(text=now)
-                self._ov_read.configure(text=f"阅读时间  {read_s}")
+                self._ov_read.configure(text=_T("阅读时间  {s}").format(s=read_s))
                 self._ov_chap.configure(text=chap[:30])
-                self._ov_prog.configure(text=f"总进度  {pct:.1f}%")
+                self._ov_prog.configure(text=_T("总进度  {pct}%").format(pct=f"{pct:.1f}"))
         except Exception:
             pass
         self.root.after(1000, self._tick_overlay)

@@ -96,7 +96,7 @@ class NovelReaderBase:
                                     foreground="#9a9a9a", justify="center")
             self.text.configure(state="normal")
             self.text.delete("1.0", "end")
-            self.text.insert("1.0", "\n\n\n\n\n正在加载书籍", "loading_text")
+            self.text.insert("1.0", "\n\n\n\n\n" + _T("正在加载书籍"), "loading_text")
             self.text.configure(state="disabled")
         except Exception:
             pass
@@ -110,7 +110,7 @@ class NovelReaderBase:
             dots = "." * (n % 4)
             self.text.configure(state="normal")
             self.text.delete("1.0", "end")
-            self.text.insert("1.0", f"\n\n\n\n\n正在加载书籍{dots}", "loading_text")
+            self.text.insert("1.0", f"\n\n\n\n\n{_T('正在加载书籍')}{dots}", "loading_text")
             self.text.configure(state="disabled")
         except Exception:
             pass
@@ -673,26 +673,26 @@ class NovelReaderBase:
         # ---- 第 2 行：排版外观 ----
         row2 = tk.Frame(bar)
         row2.pack(fill="x", pady=1)
-        _lbl(row2, "排版", fg="#999999")
+        _lbl(row2, _T("排版"), fg="#999999")
         ttk.Separator(row2, orient="vertical").pack(side="left", fill="y", padx=6)
-        _lbl(row2, "字体")
+        _lbl(row2, _T("字体"))
         self.font_cb = ttk.Combobox(row2, state="readonly", width=14)
         self.font_cb.pack(side="left", padx=(2, 8))
         self.font_cb.bind("<<ComboboxSelected>>", self._on_font_change)
 
-        _lbl(row2, "字号")
+        _lbl(row2, _T("字号"))
         ttk.Button(row2, text="－", width=2, command=lambda: self._change_font_size(-1)).pack(side="left", padx=1)
         self.size_label = tk.Label(row2, text="17", width=3, font=("微软雅黑", 10))
         self.size_label.pack(side="left")
         ttk.Button(row2, text="＋", width=2, command=lambda: self._change_font_size(1)).pack(side="left", padx=(1, 8))
 
-        _lbl(row2, "行距")
+        _lbl(row2, _T("行距"))
         ttk.Button(row2, text="－", width=2, command=lambda: self._change_line_spacing(-0.1)).pack(side="left", padx=1)
         self.spacing_label = tk.Label(row2, text="1.5", width=3, font=("微软雅黑", 10))
         self.spacing_label.pack(side="left")
         ttk.Button(row2, text="＋", width=2, command=lambda: self._change_line_spacing(0.1)).pack(side="left", padx=(1, 8))
 
-        _lbl(row2, "空行")
+        _lbl(row2, _T("空行"))
         self.paragraph_cb = ttk.Combobox(
             row2, state="readonly", width=9,
             values=[_T("不压缩"), _T("合并为一行"), _T("清理所有行")],
@@ -700,7 +700,7 @@ class NovelReaderBase:
         self.paragraph_cb.pack(side="left", padx=(2, 8))
         self.paragraph_cb.bind("<<ComboboxSelected>>", self._on_paragraph_mode)
 
-        _lbl(row2, "书页")
+        _lbl(row2, _T("书页"))
         self.theme_cb = ttk.Combobox(row2, state="readonly", values=[_T(k) for k in THEMES], width=6)
         self.theme_cb.pack(side="left", padx=(2, 0))
         self.theme_cb.bind("<<ComboboxSelected>>", self._on_theme_change)
@@ -709,7 +709,7 @@ class NovelReaderBase:
         # ---- 第 3 行：朗读控制 ----
         row3 = tk.Frame(bar)
         row3.pack(fill="x", pady=(1, 3))
-        _lbl(row3, "朗读", fg="#999999")
+        _lbl(row3, _T("朗读"), fg="#999999")
         ttk.Separator(row3, orient="vertical").pack(side="left", fill="y", padx=6)
         self.tts_toggle_btn = ttk.Button(row3, text=_T("▶ 开始朗读"), command=self._tts_toggle)
         self.tts_toggle_btn.pack(side="left")
@@ -720,13 +720,13 @@ class NovelReaderBase:
         self._status_timer = None
 
         ttk.Separator(row3, orient="vertical").pack(side="left", fill="y", padx=8)
-        _lbl(row3, "语速")
+        _lbl(row3, _T("语速"))
         ttk.Button(row3, text="－", width=2, command=lambda: self._change_rate(-10)).pack(side="left", padx=1)
         self.rate_label = tk.Label(row3, text="200", width=3, font=("微软雅黑", 10))
         self.rate_label.pack(side="left")
         ttk.Button(row3, text="＋", width=2, command=lambda: self._change_rate(10)).pack(side="left", padx=(1, 8))
 
-        _lbl(row3, "停顿")
+        _lbl(row3, _T("停顿"))
         ttk.Button(row3, text="－", width=2, command=lambda: self._change_sentence_gap(-0.05)).pack(side="left", padx=1)
         self.gap_label = tk.Label(row3, text="0.10", width=4, font=("微软雅黑", 10))
         self.gap_label.pack(side="left")
@@ -735,7 +735,7 @@ class NovelReaderBase:
         # ---- 第 4 行：音量/语音/缓存/定时 ----
         row4 = tk.Frame(bar)
         row4.pack(fill="x", pady=(0, 3))
-        _lbl(row4, "音量")
+        _lbl(row4, _T("音量"))
         self.volume_var = tk.DoubleVar(value=100)
         self.volume_scale = ttk.Scale(row4, from_=0, to=100, variable=self.volume_var,
                                        command=self._on_volume_change, length=110)
@@ -743,8 +743,8 @@ class NovelReaderBase:
         self.volume_label = tk.Label(row4, text="100", width=4, font=("微软雅黑", 10))
         self.volume_label.pack(side="left", padx=(0, 8))
 
-        _lbl(row4, "语音")
-        self.voice_cb = ttk.Combobox(row4, state="readonly", width=24)
+        _lbl(row4, _T("语音"))
+        self.voice_cb = ttk.Combobox(row4, state="readonly", width=34)
         self.voice_cb.pack(side="left", padx=(2, 0))
         self.voice_cb.bind("<<ComboboxSelected>>", self._on_voice_change)
         self.voice_cb["values"] = self._friendly_voices()
@@ -795,8 +795,11 @@ class NovelReaderBase:
             self.voice_cb.current(idx)
             self.tts.set_voice(self._voice_ids[idx])
         elif voices:
-            # 默认使用第一个本地（系统）语音
-            idx = getattr(self, "_first_sapi_idx", 0)
+            # 非中文界面默认本语言第一个音色；中文界面默认第一个本地（系统）语音
+            if self.settings.get("ui_lang") != "zh":
+                idx = 0
+            else:
+                idx = getattr(self, "_first_sapi_idx", 0)
             self.voice_cb.current(idx)
             self.tts.set_voice(self._voice_ids[idx])
         self._apply_theme(theme)
@@ -807,7 +810,20 @@ class NovelReaderBase:
         return ordered + rest
     def _friendly_voices(self):
         # 默认本地（系统语音，离线可用）；Edge 语音作为可选（需联网）
-        edge = SpeechController.list_edge_voices()
+        # 只显示当前界面语言的音色
+        from .tts_engine import (
+            EDGE_VOICES,
+            EDGE_VOICES_EN,
+            EDGE_VOICES_JA,
+            EDGE_VOICES_KO,
+        )
+        _lang_voices = {
+            "zh": EDGE_VOICES,
+            "en": EDGE_VOICES_EN,
+            "ja": EDGE_VOICES_JA,
+            "ko": EDGE_VOICES_KO,
+        }
+        edge = list(_lang_voices.get(self.settings.get("ui_lang", "zh"), EDGE_VOICES))
         sapi = SpeechController.list_voices()
         self._voice_ids = []
         names = []
