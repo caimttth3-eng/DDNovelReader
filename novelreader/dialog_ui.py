@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     make_scrollbar,
     THEMES,
@@ -62,54 +63,81 @@ class DialogMixin:
                 icon_lbl = tk.Label(icon_col, image=self._about_icon_img, bg=_about_bg, cursor="hand2")
                 icon_lbl.pack()
                 icon_lbl.bind("<Button-1>", lambda e: self._open_skin_picker())
-                tk.Label(icon_col, text="点击换主题", fg="#999999", bg=_about_bg,
+                tk.Label(icon_col, text=_T("点击换主题"), fg="#999999", bg=_about_bg,
                          font=("微软雅黑", 8)).pack(pady=(2, 0))
         except Exception:
             pass
         # 右侧：文字信息
         info = tk.Frame(head, bg=_about_bg)
         info.pack(side="left", fill="x", expand=True)
-        tk.Label(info, text=f"{version_info.APP_NAME}  v{__version__}",
+        tk.Label(info, text=f"{_T(version_info.APP_NAME)}  v{__version__}",
                  font=("微软雅黑", 17, "bold"), bg=_about_bg).pack(anchor="w")
-        tk.Label(info, text=f"Windows 桌面有声小说阅读器（多多朗读）  ·  当前版本 v{__version__}",
+        tk.Label(info, text=_T("支持 Windows / macOS / Linux / Android 的有声小说阅读器（多多朗读）  ·  当前版本 v{version}").format(version=__version__),
                  fg="#777777", bg=_about_bg, font=("微软雅黑", 10)).pack(anchor="w", pady=(2, 0))
         email_row = tk.Frame(info, bg=_about_bg)
         email_row.pack(anchor="w", pady=(6, 0))
-        tk.Label(email_row, text="作者联系方式：", fg="#555555", bg=_about_bg,
+        tk.Label(email_row, text=_T("作者联系方式："), fg="#555555", bg=_about_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         self._email_label = tk.Label(
             email_row, text="230468896@qq.com", fg="#2b6cb0", bg=_about_bg,
             font=("微软雅黑", 10, "underline"), cursor="hand2")
         self._email_label.pack(side="left")
         self._email_label.bind("<Button-1>", lambda e: self._copy_email())
-        tk.Label(email_row, text="（点击复制）", fg="#999999", bg=_about_bg,
+        tk.Label(email_row, text=_T("（点击复制）"), fg="#999999", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
 
         bili_row = tk.Frame(info, bg=_about_bg)
         bili_row.pack(anchor="w", pady=(4, 0))
-        tk.Label(bili_row, text="B站空间：", fg="#555555", bg=_about_bg,
+        tk.Label(bili_row, text=_T("B站空间："), fg="#555555", bg=_about_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         self._bili_label = tk.Label(
             bili_row, text="https://space.bilibili.com/42444", fg="#2b6cb0", bg=_about_bg,
             font=("微软雅黑", 10, "underline"), cursor="hand2")
         self._bili_label.pack(side="left")
         self._bili_label.bind("<Button-1>", lambda e: self._open_bili())
-        tk.Label(bili_row, text="（点击打开）", fg="#999999", bg=_about_bg,
+        tk.Label(bili_row, text=_T("（点击打开）"), fg="#999999", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
-        tk.Label(info, text="反馈问题可以在B站动态留言，B站我天天看。", fg="#8a5a00", bg=_about_bg,
+        tk.Label(info, text=_T("反馈问题可以在B站动态留言，B站我天天看。"), fg="#8a5a00", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(anchor="w", pady=(4, 0))
 
         dy_row = tk.Frame(info, bg=_about_bg)
         dy_row.pack(anchor="w", pady=(2, 0))
-        tk.Label(dy_row, text="抖音号：", fg="#555555", bg=_about_bg,
+        tk.Label(dy_row, text=_T("抖音号："), fg="#555555", bg=_about_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         self._dy_label = tk.Label(
             dy_row, text="120735162", fg="#2b6cb0", bg=_about_bg,
             font=("微软雅黑", 10, "underline"), cursor="hand2")
         self._dy_label.pack(side="left")
         self._dy_label.bind("<Button-1>", lambda e: self._copy_douyin())
-        tk.Label(dy_row, text="（点击复制）", fg="#999999", bg=_about_bg,
+        tk.Label(dy_row, text=_T("（点击复制）"), fg="#999999", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
+        gh_row = tk.Frame(info, bg=_about_bg)
+        gh_row.pack(anchor="w", pady=(2, 0))
+        tk.Label(gh_row, text=_T("软件发布："), fg="#555555", bg=_about_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._gh_label = tk.Label(
+            gh_row, text="github.com/caimttth3-eng/DDNovelReader", fg="#2b6cb0", bg=_about_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._gh_label.pack(side="left")
+        self._gh_label.bind("<Button-1>", lambda e: self._open_github())
+        tk.Label(gh_row, text=_T("（点击打开）"), fg="#999999", bg=_about_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
+        lang_row = tk.Frame(info, bg=_about_bg)
+        lang_row.pack(anchor="w", pady=(8, 0))
+        tk.Label(lang_row, text=_T("界面语言"), fg="#555555", bg=_about_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        lang_cb = ttk.Combobox(lang_row, state="readonly", width=10,
+                               values=["中文", "English"])
+        lang_cb.pack(side="left")
+        from .i18n import get_lang as _get_lang
+        lang_cb.set("English" if _get_lang() == "en" else "中文")
+        def _on_lang(e=None):
+            v = lang_cb.get()
+            self.storage.set_setting("ui_lang", "en" if v == "English" else "zh")
+            messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
+        lang_cb.bind("<<ComboboxSelected>>", _on_lang)
 
         nb = ttk.Notebook(top)
         nb.pack(fill="both", expand=True, padx=12, pady=(4, 12))
@@ -117,9 +145,9 @@ class DialogMixin:
         tab_update = tk.Frame(nb)
         tab_keys = tk.Frame(nb)
         tab_cache = tk.Frame(nb)
-        nb.add(tab_update, text="更新记录")
-        nb.add(tab_keys, text="快捷键说明")
-        nb.add(tab_cache, text="缓存管理")
+        nb.add(tab_update, text=_T("更新记录"))
+        nb.add(tab_keys, text=_T("快捷键说明"))
+        nb.add(tab_cache, text=_T("缓存管理"))
 
         txt = tk.Text(tab_update, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
         tsb = make_scrollbar(tab_update, txt.yview)
@@ -134,8 +162,8 @@ class DialogMixin:
         keys.configure(yscrollcommand=ksb.set)
         ksb.pack(side="right", fill="y")
         keys.pack(side="left", fill="both", expand=True)
-        for k, desc in version_info.SHORTCUTS:
-            keys.insert("end", f"{k}\n    {desc}\n\n")
+        for k, desc, desc_en in version_info.SHORTCUTS:
+            keys.insert("end", f"{k}\n    {desc} / {desc_en}\n\n")
         keys.configure(state="disabled")
 
         # —— 缓存管理（可滚动卡片式布局） ——
@@ -182,29 +210,29 @@ class DialogMixin:
             path_lbl.bind("<Button-1>", lambda e: open_cmd())
 
             # 大小
-            size_lbl = tk.Label(card, text="正在统计…", font=("微软雅黑", 10), fg="#444444", bg=_card_bg)
+            size_lbl = tk.Label(card, text=_T("正在统计…"), font=("微软雅黑", 10), fg="#444444", bg=_card_bg)
             size_lbl.pack(anchor="w", padx=14, pady=(2, 6))
 
             # 按钮行
             btn_row = tk.Frame(card, bg=_card_bg)
             btn_row.pack(anchor="w", padx=14, pady=(0, 12))
             if kind == "text":
-                ttk.Button(btn_row, text="自定义位置",
+                ttk.Button(btn_row, text=_T("自定义位置"),
                            command=lambda: self._choose_text_cache_folder(path_lbl, size_lbl)).pack(side="left")
-                ttk.Button(btn_row, text="一键转移",
+                ttk.Button(btn_row, text=_T("一键转移"),
                            command=lambda: self._transfer_text_cache(path_lbl, size_lbl)).pack(side="left", padx=(8, 0))
-                ttk.Button(btn_row, text="打开文件夹",
+                ttk.Button(btn_row, text=_T("打开文件夹"),
                            command=self._open_cache_folder).pack(side="left", padx=(8, 0))
-                ttk.Button(btn_row, text="清除",
+                ttk.Button(btn_row, text=_T("清除"),
                            command=lambda: self._clear_cache(size_lbl)).pack(side="left", padx=(8, 0))
             else:
-                ttk.Button(btn_row, text="自定义位置",
+                ttk.Button(btn_row, text=_T("自定义位置"),
                            command=lambda: self._choose_tts_cache_folder(path_lbl, tts_size_lbl)).pack(side="left")
-                ttk.Button(btn_row, text="一键转移",
+                ttk.Button(btn_row, text=_T("一键转移"),
                            command=lambda: self._transfer_tts_cache(path_lbl, tts_size_lbl)).pack(side="left", padx=(8, 0))
-                ttk.Button(btn_row, text="打开文件夹",
+                ttk.Button(btn_row, text=_T("打开文件夹"),
                            command=self._open_tts_cache_folder).pack(side="left", padx=(8, 0))
-                ttk.Button(btn_row, text="清除",
+                ttk.Button(btn_row, text=_T("清除"),
                            command=lambda: self._clear_audio_cache(tts_size_lbl)).pack(side="left", padx=(8, 0))
 
             return path_lbl, size_lbl, loc_lbl
@@ -212,7 +240,7 @@ class DialogMixin:
         # 正文解析缓存卡片
         path_lbl, size_lbl, loc_lbl1 = _make_cache_card(
             cache_inner,
-            title="正文解析缓存",
+            title=_T("正文解析缓存"),
             subtitle="书籍分章解析结果，删除后下次打开需重新解析（不影响原文件）。",
             icon="📄",
             accent="#2b6cb0",
@@ -222,7 +250,7 @@ class DialogMixin:
         # 音频缓存卡片
         tts_path_lbl, tts_size_lbl, loc_lbl2 = _make_cache_card(
             cache_inner,
-            title="音频缓存（整本语音）",
+            title=_T("音频缓存（整本语音）"),
             subtitle="整本语音合成缓存，体积较大，建议放到非 C 盘。",
             icon="🔊",
             accent="#b00020",
@@ -236,8 +264,8 @@ class DialogMixin:
         def _refresh_sizes():
             self._update_cache_size_label(size_lbl)
             self._update_tts_cache_size_label(tts_size_lbl)
-            loc_lbl1.configure(text="自定义位置" if self.settings.get("cache_dir") else "默认位置")
-            loc_lbl2.configure(text="自定义位置" if self.settings.get("tts_cache_dir") else "默认位置")
+            loc_lbl1.configure(text=_T("自定义位置") if self.settings.get("cache_dir") else "默认位置")
+            loc_lbl2.configure(text=_T("自定义位置") if self.settings.get("tts_cache_dir") else "默认位置")
         top.after(120, _refresh_sizes)
 
         self._about_win = top
@@ -253,7 +281,7 @@ class DialogMixin:
         cur = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])
         top.configure(bg=cur["bg"])
 
-        tk.Label(top, text="选择控件主题风格（点击即切换，即时生效）",
+        tk.Label(top, text=_T("选择控件主题风格（点击即切换，即时生效）"),
                  bg=cur["bg"], fg=cur["muted"], font=("微软雅黑", 10)).pack(pady=(12, 8))
 
         container = tk.Frame(top, bg=cur["bg"])
@@ -306,6 +334,14 @@ class DialogMixin:
         import webbrowser
         webbrowser.open("https://space.bilibili.com/42444")
 
+
+    def _open_github(self):
+        try:
+            import webbrowser
+            webbrowser.open("https://github.com/caimttth3-eng/DDNovelReader")
+        except Exception:
+            pass
+
     def _copy_douyin(self):
         """复制作者抖音号到剪贴板。"""
         dy = "120735162"
@@ -314,7 +350,7 @@ class DialogMixin:
             self.root.clipboard_append(dy)
             lbl = self._dy_label
             try:
-                lbl.configure(text="已复制 ✓")
+                lbl.configure(text=_T("已复制 ✓"))
 
                 def _restore():
                     try:
@@ -337,7 +373,7 @@ class DialogMixin:
             self.root.clipboard_append(email)
             lbl = self._email_label
             try:
-                lbl.configure(text="已复制 ✓")
+                lbl.configure(text=_T("已复制 ✓"))
 
                 def _restore():
                     try:
@@ -381,12 +417,12 @@ class DialogMixin:
         dlg.resizable(False, False)
         dlg.transient(self.root)
         self._center_window(dlg)
-        tk.Label(dlg, text="设置定时时长（分钟）：", font=("微软雅黑", 10)).pack(pady=(16, 6))
+        tk.Label(dlg, text=_T("设置定时时长（分钟）："), font=("微软雅黑", 10)).pack(pady=(16, 6))
         var = tk.IntVar(value=30)
         sp = tk.Spinbox(dlg, from_=1, to=600, textvariable=var, width=8, font=("微软雅黑", 11))
         sp.pack()
         if self._timer_running:
-            tk.Label(dlg, text="（当前已有定时，重新设置将覆盖）", fg="#cc6600",
+            tk.Label(dlg, text=_T("（当前已有定时，重新设置将覆盖）"), fg="#cc6600",
                      font=("微软雅黑", 8)).pack(pady=(6, 0))
 
         def do_start():
@@ -394,20 +430,20 @@ class DialogMixin:
             self._timer_minutes = mins
             self._timer_deadline = time.time() + mins * 60
             self._timer_running = True
-            self._flash_status(f"已设定 {mins} 分钟定时，到点自动停止朗读")
+            self._flash_status(_T("已设定 {mins} 分钟定时，到点自动停止朗读").format(mins=mins))
             dlg.destroy()
 
         def do_cancel():
             self._timer_running = False
             self._timer_deadline = None
-            self.timer_btn.configure(text="定时")
+            self.timer_btn.configure(text=_T("定时"))
             self._flash_status("已取消定时")
             dlg.destroy()
 
         ops = tk.Frame(dlg)
         ops.pack(pady=12)
-        tk.Button(ops, text="开始", width=8, command=do_start).pack(side="left", padx=8)
-        tk.Button(ops, text="取消定时", width=10, command=do_cancel).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("开始"), width=8, command=do_start).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("取消定时"), width=12, command=do_cancel).pack(side="left", padx=8)
     def _tick_timer(self):
         """每秒轮询：到点停止朗读，并刷新定时按钮倒计时。"""
         try:
@@ -417,14 +453,14 @@ class DialogMixin:
                     mins = self._timer_minutes
                     self._timer_running = False
                     self._timer_deadline = None
-                    self.timer_btn.configure(text="定时")
+                    self.timer_btn.configure(text=_T("定时"))
                     self._tts_stop()
-                    self._flash_status(f"定时时间到，已停止朗读（本次定时 {mins} 分钟）")
+                    self._flash_status(_T("定时时间到，已停止朗读（本次定时 {mins} 分钟）").format(mins=mins))
                 else:
                     m, s = divmod(int(remain), 60)
                     self.timer_btn.configure(text=f"定时 {m:02d}:{s:02d}")
             else:
-                self.timer_btn.configure(text="定时")
+                self.timer_btn.configure(text=_T("定时"))
         except Exception:
             pass
         try:
@@ -434,7 +470,7 @@ class DialogMixin:
     def _open_percent_dialog(self):
         """点击右下角百分比：弹窗手动输入百分比并跳转。"""
         if not self.book:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
             return
         dlg = tk.Toplevel(self.root)
         dlg.title("跳转到进度")
@@ -461,8 +497,8 @@ class DialogMixin:
             dlg.destroy()
             self._seek_percent(pct)
 
-        tk.Button(ops, text="跳转", width=8, command=ok).pack(side="left", padx=8)
-        tk.Button(ops, text="取消", width=8, command=dlg.destroy).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("跳转"), width=8, command=ok).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("取消"), width=8, command=dlg.destroy).pack(side="left", padx=8)
     def _seek_percent(self, pct):
         """按百分比跳转到对应章节/位置。"""
         if not self.book or self.book.total_chars <= 0:

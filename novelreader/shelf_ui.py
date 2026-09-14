@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -81,7 +82,7 @@ class ShelfMixin:
         key_map = {"progress": "progress", "title": "title", "size": "size", "time": "time"}
         rows.sort(key=lambda r: r.get(key_map.get(col, "time"), 0), reverse=rev)
         # 更新表头箭头
-        arrows = {"progress": "进度", "title": "书名", "size": "大小", "time": "时间"}
+        arrows = {"progress": _T("进度"), "title": _T("书名"), "size": _T("大小"), "time": _T("时间")}
         for c, label in arrows.items():
             txt = label
             if c == col:
@@ -169,12 +170,12 @@ class ShelfMixin:
             if bak and os.path.exists(bak):
                 path = bak
             else:
-                messagebox.showinfo("提示", "原文件不存在或已被移动。")
+                messagebox.showinfo(_T("提示"), "原文件不存在或已被移动。")
                 return
         if _copy_files_to_clipboard([path]):
-            messagebox.showinfo("已复制", "原文件已复制到剪贴板，可在文件管理器中直接粘贴（Ctrl+V）。")
+            messagebox.showinfo(_T("已复制"), "原文件已复制到剪贴板，可在文件管理器中直接粘贴（Ctrl+V）。")
         else:
-            messagebox.showerror("失败", "复制到剪贴板失败。")
+            messagebox.showerror(_T("失败"), "复制到剪贴板失败。")
     def _copy_book_title(self):
         bid = self._selected_bid()
         if not bid:
@@ -184,7 +185,7 @@ class ShelfMixin:
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(meta.get("title", ""))
-        messagebox.showinfo("已复制", f"已复制书名：{meta.get('title', '')}")
+        messagebox.showinfo(_T("已复制"), f"已复制书名：{meta.get('title', '')}")
     def _delete_audio_cache(self, bid):
         """删除某本书的全部音频缓存目录。"""
         try:
@@ -220,7 +221,7 @@ class ShelfMixin:
         """一键备份：把书架 + 进度 + 设置 + 书签（library.json）导出到用户选择的文件。"""
         src = self.storage.path
         if not os.path.exists(src):
-            messagebox.showinfo("提示", "暂无数据可备份")
+            messagebox.showinfo(_T("提示"), "暂无数据可备份")
             return
         default_name = f"多多朗读备份_{time.strftime('%Y%m%d_%H%M%S')}.json"
         try:
@@ -236,10 +237,10 @@ class ShelfMixin:
         try:
             import shutil
             shutil.copyfile(src, dest)
-            messagebox.showinfo("备份成功",
+            messagebox.showinfo(_T("备份成功"),
                                 f"已备份书架、阅读进度、设置与书签到：\n{dest}\n\n提示：缓存体积较大，不包含在备份内。")
         except Exception as e:
-            messagebox.showerror("备份失败", f"备份失败：{e}")
+            messagebox.showerror(_T("备份失败"), f"备份失败：{e}")
 
     def _restore_library(self):
         """一键还原：从备份文件恢复书架 + 进度 + 设置 + 书签。
@@ -248,14 +249,14 @@ class ShelfMixin:
         """
         try:
             src = filedialog.askopenfilename(
-                title="选择备份文件",
+                title=_T("选择备份文件"),
                 filetypes=[("JSON 备份文件", "*.json")],
             )
         except Exception:
             return
         if not src:
             return
-        if not messagebox.askyesno("确认还原", "还原将覆盖当前的书架、阅读进度、设置与书签，是否继续？"):
+        if not messagebox.askyesno(_T("确认还原"), "还原将覆盖当前的书架、阅读进度、设置与书签，是否继续？"):
             return
         try:
             import json
@@ -295,6 +296,6 @@ class ShelfMixin:
             msg = "已从备份还原书架、阅读进度、设置与书签。"
             if cur_bak:
                 msg += f"\n\n还原前数据已自动备份到：\n{cur_bak}"
-            messagebox.showinfo("还原成功", msg)
+            messagebox.showinfo(_T("还原成功"), msg)
         except Exception as e:
-            messagebox.showerror("还原失败", f"还原失败：{e}\n原数据未受影响。")
+            messagebox.showerror(_T("还原失败"), f"还原失败：{e}\n原数据未受影响。")

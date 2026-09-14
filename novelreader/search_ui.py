@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 from .constants import make_scrollbar
+from .i18n import T as _T
 
 
 class SearchMixin:
@@ -11,7 +12,7 @@ class SearchMixin:
     def _open_search_dialog(self):
         """功能区“搜索”按钮：弹出书内全文搜索窗口（初始位置屏幕中间）。"""
         if not self.book:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
             return
         dlg = tk.Toplevel(self.root)
         dlg.title(f"全文搜索 - {self.book.title}")
@@ -23,14 +24,14 @@ class SearchMixin:
 
         top_bar = tk.Frame(dlg, bg=self._dialog_bg())
         top_bar.pack(fill="x", padx=14, pady=(14, 6))
-        tk.Label(top_bar, text="关键词：", bg=self._dialog_bg(),
+        tk.Label(top_bar, text=_T("关键词："), bg=self._dialog_bg(),
                  font=("微软雅黑", 10)).pack(side="left")
         qvar = tk.StringVar()
         ent = tk.Entry(top_bar, textvariable=qvar, font=("微软雅黑", 10))
         ent.pack(side="left", fill="x", expand=True, padx=(0, 8))
         ent.focus_set()
 
-        res_lbl = tk.Label(dlg, text="输入关键词后点击搜索（搜索前 500 条结果）", bg=self._dialog_bg(),
+        res_lbl = tk.Label(dlg, text=_T("输入关键词后点击搜索（搜索前 500 条结果）"), bg=self._dialog_bg(),
                            fg="#888888", font=("微软雅黑", 9))
         res_lbl.pack(anchor="w", padx=14, pady=(0, 4))
 
@@ -113,5 +114,5 @@ class SearchMixin:
 
         ops = tk.Frame(dlg, bg=self._dialog_bg())
         ops.pack(fill="x", padx=14, pady=(0, 12))
-        ttk.Button(ops, text="搜索", command=do_search).pack(side="left")
-        ttk.Button(ops, text="关闭", command=dlg.destroy).pack(side="right")
+        ttk.Button(ops, text=_T("搜索"), command=do_search).pack(side="left")
+        ttk.Button(ops, text=_T("关闭"), command=dlg.destroy).pack(side="right")

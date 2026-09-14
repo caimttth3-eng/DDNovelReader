@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     make_scrollbar,
     THEMES,
@@ -58,14 +59,14 @@ class DownloadMixin:
 
         tk.Label(
             win,
-            text="整本缓存：每本书一条任务，可多本同时缓存；音频体积较大，请慎用。双击或点「章节选择」进入章节。",
+            text=_T("整本缓存：每本书一条任务，可多本同时缓存；音频体积较大，请慎用。双击或点「章节选择」进入章节。"),
             fg="#b00020", font=("微软雅黑", 9), anchor="w", wraplength=840,
         ).pack(fill="x", padx=12, pady=(8, 2))
 
         bar = tk.Frame(win)
         bar.pack(fill="x", padx=12, pady=4)
-        tk.Button(bar, text="全部开始/继续", width=12, command=self._cache_mgr_all_start).pack(side="left")
-        tk.Button(bar, text="全部暂停", width=10, command=self._cache_mgr_all_pause).pack(side="left", padx=4)
+        tk.Button(bar, text=_T("全部开始/继续"), width=12, command=self._cache_mgr_all_start).pack(side="left")
+        tk.Button(bar, text=_T("全部暂停"), width=10, command=self._cache_mgr_all_pause).pack(side="left", padx=4)
 
         frame = tk.Frame(win)
         frame.pack(fill="both", expand=True, padx=12, pady=2)
@@ -73,10 +74,10 @@ class DownloadMixin:
             frame, columns=("title", "status", "progress", "size"),
             show="headings", selectmode="extended",
         )
-        tree.heading("title", text="书名")
-        tree.heading("status", text="状态")
-        tree.heading("progress", text="进度")
-        tree.heading("size", text="缓存大小")
+        tree.heading("title", text=_T("书名"))
+        tree.heading("status", text=_T("状态"))
+        tree.heading("progress", text=_T("进度"))
+        tree.heading("size", text=_T("缓存大小"))
         tree.column("title", width=280, anchor="w")
         tree.column("status", width=90, anchor="center")
         tree.column("progress", width=230, anchor="center")
@@ -96,18 +97,18 @@ class DownloadMixin:
 
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=6)
-        self._cache_mgr_play_btn = tk.Button(ops, text="▶ 开始/继续", width=12, command=self._cache_mgr_start)
+        self._cache_mgr_play_btn = tk.Button(ops, text=_T("▶ 开始/继续"), width=12, command=self._cache_mgr_start)
         self._cache_mgr_play_btn.pack(side="left")
-        self._cache_mgr_stop_btn = tk.Button(ops, text="停止", width=8, command=self._cache_mgr_stop, state="disabled")
+        self._cache_mgr_stop_btn = tk.Button(ops, text=_T("停止"), width=8, command=self._cache_mgr_stop, state="disabled")
         self._cache_mgr_stop_btn.pack(side="left", padx=4)
-        tk.Button(ops, text="章节选择…", width=10, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
-        tk.Button(ops, text="验证补全", width=9, command=self._cache_mgr_verify).pack(side="left", padx=4)
-        tk.Button(ops, text="删除音频缓存", width=11, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
-        tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
+        tk.Button(ops, text=_T("章节选择…"), width=13, command=self._cache_mgr_open_selected).pack(side="left", padx=4)
+        tk.Button(ops, text=_T("验证补全"), width=9, command=self._cache_mgr_verify).pack(side="left", padx=4)
+        tk.Button(ops, text=_T("删除音频缓存"), width=12, command=self._cache_mgr_delete_audio).pack(side="left", padx=4)
+        tk.Button(ops, text=_T("关闭"), width=8, command=win.destroy).pack(side="right")
 
         wk = tk.Frame(win)
         wk.pack(fill="x", padx=12, pady=(2, 0))
-        tk.Label(wk, text="并发下载线程：", font=("微软雅黑", 9)).pack(side="left")
+        tk.Label(wk, text=_T("并发下载线程："), font=("微软雅黑", 9)).pack(side="left")
         self._cache_workers_var = tk.StringVar(
             value=str(self.storage.get_setting("tts_cache_workers", 6)))
         wbox = ttk.Combobox(
@@ -117,7 +118,7 @@ class DownloadMixin:
         wbox.pack(side="left")
         wbox.bind("<<ComboboxSelected>>", lambda e: self._cache_workers_save())
         tk.Label(
-            wk, text="线程越多下载越快；超过 6 易被微软限流，失败重试反而更慢。",
+            wk, text=_T("线程越多下载越快；超过 6 易被微软限流，失败重试反而更慢。"),
             fg="#b00020", font=("微软雅黑", 8),
         ).pack(side="left", padx=8)
 
@@ -195,7 +196,7 @@ class DownloadMixin:
             total = self.tts.tts_cache_size()
             sel = len(self._cache_tree.selection()) if hasattr(self, "_cache_tree") else 0
             self._cache_mgr_status.configure(
-                text=f"已选 {sel} 本 · 缓存中 {caching} 本 · 音频缓存总大小 {self._format_bytes(total)}"
+                text=_T("已选 {sel} 本 · 缓存中 {caching} 本 · 音频缓存总大小 {size}").format(sel=sel, caching=caching, size=self._format_bytes(total))
             )
         except Exception:
             pass
@@ -260,12 +261,12 @@ class DownloadMixin:
                     self.root.after(0, lambda: messagebox.showinfo(
                         "提示", "整本缓存仅支持 Edge 神经语音（如晓晓/云希等）。\n请在「语音」下拉框选择 Edge 音色后再试。"))
             except Exception as e:
-                self.root.after(0, lambda e=e: messagebox.showinfo("提示", f"缓存失败：{e}"))
+                self.root.after(0, lambda e=e: messagebox.showinfo(_T("提示"), f"缓存失败：{e}"))
         threading.Thread(target=worker, daemon=True).start()
     def _cache_mgr_start(self):
         bids = self._cache_mgr_selected_bids()
         if not bids:
-            messagebox.showinfo("提示", "请先在列表中选择至少一本书", parent=self._cache_dlg)
+            messagebox.showinfo(_T("提示"), "请先在列表中选择至少一本书", parent=self._cache_dlg)
             return
         for bid in bids:
             self._cache_mgr_start_one(bid)
@@ -302,18 +303,18 @@ class DownloadMixin:
             play = self._cache_mgr_play_btn
             stop = self._cache_mgr_stop_btn
             if not bids:
-                play.configure(text="▶ 开始/继续", command=self._cache_mgr_start, state="disabled")
+                play.configure(text=_T("▶ 开始/继续"), command=self._cache_mgr_start, state="disabled")
                 stop.configure(state="disabled")
                 return
             has_active = any(self._is_caching(b) for b in bids)
             has_paused = any(self._cache_mgr_is_paused(b) for b in bids)
             all_done = all(self._cache_mgr_is_done(b) for b in bids)
             if has_active:
-                play.configure(text="⏸ 暂停", command=self._cache_mgr_pause, state="normal")
+                play.configure(text=_T("⏸ 暂停"), command=self._cache_mgr_pause, state="normal")
             else:
-                play.configure(text="▶ 开始/继续", command=self._cache_mgr_start, state="normal")
+                play.configure(text=_T("▶ 开始/继续"), command=self._cache_mgr_start, state="normal")
             if all_done:
-                play.configure(text="✔ 已完成", command=None, state="disabled")
+                play.configure(text=_T("✔ 已完成"), command=None, state="disabled")
                 stop.configure(state="disabled")
             else:
                 stop.configure(state="normal" if (has_active or has_paused) else "disabled")
@@ -323,14 +324,14 @@ class DownloadMixin:
         """验证选中书的整本语音缓存：重建任务列表，扫描磁盘，报告缺失并支持一键补全。"""
         bids = self._cache_mgr_selected_bids()
         if not bids:
-            messagebox.showinfo("提示", "请先在列表中选择至少一本书", parent=self._cache_dlg)
+            messagebox.showinfo(_T("提示"), "请先在列表中选择至少一本书", parent=self._cache_dlg)
             return
         wait = tk.Toplevel(self.root)
         wait.title("验证中")
         wait.transient(self.root)
         wait.attributes("-topmost", True)
         self._center_window(wait)
-        tk.Label(wait, text="正在验证缓存完整性，请稍候…\n（百万字书需数秒）",
+        tk.Label(wait, text=_T("正在验证缓存完整性，请稍候…\n（百万字书需数秒）"),
                  font=("微软雅黑", 10), padx=30, pady=20).pack()
         wait.update()
 
@@ -364,7 +365,7 @@ class DownloadMixin:
         win.minsize(580, 360)
         win.transient(self.root)
         self._center_window(win)
-        tk.Label(win, text="整本语音缓存验证结果（按当前分章 / 音色 / 语速重建任务列表，与磁盘逐句比对）",
+        tk.Label(win, text=_T("整本语音缓存验证结果（按当前分章 / 音色 / 语速重建任务列表，与磁盘逐句比对）"),
                  fg="#555555", font=("微软雅黑", 9), anchor="w", wraplength=620).pack(fill="x", padx=12, pady=(8, 2))
         frm = tk.Frame(win)
         frm.pack(fill="both", expand=True, padx=12, pady=4)
@@ -373,32 +374,32 @@ class DownloadMixin:
             card = tk.Frame(frm, bd=1, relief="groove")
             card.pack(fill="x", pady=4)
             if "error" in r:
-                tk.Label(card, text="《%s》 验证失败：%s" % (title, r["error"]), fg="#b00020",
+                tk.Label(card, text=_T("《%s》 验证失败：%s") % (title, r["error"]), fg="#b00020",
                          font=("微软雅黑", 9), anchor="w", wraplength=600).pack(padx=8, pady=4)
                 continue
             total = r.get("total", 0)
             miss = r.get("missing_count", 0)
             if r.get("complete"):
-                tk.Label(card, text="《%s》 ✔ 完整：%d 句全部存在，无缺失。" % (title, total),
+                tk.Label(card, text=_T("《%s》 ✔ 完整：%d 句全部存在，无缺失。") % (title, total),
                          fg="#1a7a3a", font=("微软雅黑", 10), anchor="w").pack(padx=8, pady=(6, 6))
             else:
                 chs = sorted((r.get("chapters") or {}).items())
                 ch_txt = "、".join("第%d章" % (c + 1) for c, _ in chs[:12])
                 if len(chs) > 12:
                     ch_txt += " 等 %d 章" % len(chs)
-                tk.Label(card, text="《%s》 共 %d 句，缺失 %d 句（分布在 %d 章）：%s"
+                tk.Label(card, text=_T("《%s》 共 %d 句，缺失 %d 句（分布在 %d 章）：%s")
                          % (title, total, miss, len(chs), ch_txt),
                          fg="#b00020", font=("微软雅黑", 10), anchor="w", wraplength=580).pack(padx=8, pady=(6, 2))
-                tk.Button(card, text="立即补全缺失", width=14,
+                tk.Button(card, text=_T("立即补全缺失"), width=14,
                           command=lambda bid=bid, r=r, w=win: self._cache_mgr_fill(bid, r, w)
                           ).pack(anchor="w", padx=8, pady=(0, 6))
-        tk.Button(win, text="关闭", width=10, command=win.destroy).pack(pady=8)
+        tk.Button(win, text=_T("关闭"), width=10, command=win.destroy).pack(pady=8)
 
     def _cache_mgr_fill(self, bid, r, result_win=None):
         """对验证结果中的缺失任务启动补全下载（只下载缺失句子）。启动后关闭验证结果窗。"""
         missing = r.get("missing") or []
         if not missing:
-            messagebox.showinfo("提示", "没有需要补全的任务", parent=result_win or self.root)
+            messagebox.showinfo(_T("提示"), "没有需要补全的任务", parent=result_win or self.root)
             return
 
         def worker():
@@ -412,7 +413,7 @@ class DownloadMixin:
                     book = self._load_book(meta.get("path", ""))
                 self.tts.fill_missing_cache(book, bid, missing)
             except Exception as e:
-                self.root.after(0, lambda e=e: messagebox.showinfo("提示", "补全失败：%s" % e, parent=self.root))
+                self.root.after(0, lambda e=e: messagebox.showinfo(_T("提示"), "补全失败：%s" % e, parent=self.root))
 
         threading.Thread(target=worker, daemon=True).start()
         try:
@@ -420,7 +421,7 @@ class DownloadMixin:
                 result_win.destroy()
         except Exception:
             pass
-        messagebox.showinfo("提示", "补全任务已启动（仅下载缺失句），可在下载管理器中查看进度。", parent=self.root)
+        messagebox.showinfo(_T("提示"), "补全任务已启动（仅下载缺失句），可在下载管理器中查看进度。", parent=self.root)
         try:
             self._cache_mgr_refresh_rows()
         except Exception:
@@ -429,7 +430,7 @@ class DownloadMixin:
     def _cache_mgr_delete_audio(self):
         bids = self._cache_mgr_selected_bids()
         if not bids:
-            messagebox.showinfo("提示", "请先选择要删除音频缓存的书", parent=self._cache_dlg)
+            messagebox.showinfo(_T("提示"), "请先选择要删除音频缓存的书", parent=self._cache_dlg)
             return
         if not messagebox.askyesno(
             "删除音频缓存",
@@ -443,7 +444,7 @@ class DownloadMixin:
     def _cache_mgr_open_selected(self):
         bids = self._cache_mgr_selected_bids()
         if not bids:
-            messagebox.showinfo("提示", "请先选择一本书", parent=self._cache_dlg)
+            messagebox.showinfo(_T("提示"), "请先选择一本书", parent=self._cache_dlg)
             return
         self._open_book_cache_dialog(bids[0])
     def _cache_mgr_menu(self, event):
@@ -454,8 +455,8 @@ class DownloadMixin:
         except Exception:
             pass
         m = tk.Menu(self._cache_dlg, tearoff=0)
-        m.add_command(label="打开该书缓存…", command=self._cache_mgr_open_selected)
-        m.add_command(label="删除音频缓存", command=self._cache_mgr_delete_audio)
+        m.add_command(label=_T("打开该书缓存…"), command=self._cache_mgr_open_selected)
+        m.add_command(label=_T("删除音频缓存"), command=self._cache_mgr_delete_audio)
         try:
             m.tk_popup(event.x_root, event.y_root)
         finally:
@@ -474,7 +475,7 @@ class DownloadMixin:
                 if cached:
                     book = book_loader.BookContent.from_dict(cached)
                 else:
-                    messagebox.showerror("无法打开", f"无法读取书籍文件：\n{meta['path']}")
+                    messagebox.showerror(_T("无法打开"), f"无法读取书籍文件：\n{meta['path']}")
                     return
         self._cache_mgr_target_bid = bid
         self._cache_mgr_target_book = book
@@ -498,17 +499,17 @@ class DownloadMixin:
 
         tk.Label(
             win,
-            text="整本缓存功能用于网络不稳定时提前缓存减少卡顿；缓存音频体积较大，请慎用。",
+            text=_T("整本缓存功能用于网络不稳定时提前缓存减少卡顿；缓存音频体积较大，请慎用。"),
             fg="#b00020", font=("微软雅黑", 9), anchor="w", justify="left", wraplength=600,
         ).pack(fill="x", padx=12, pady=(8, 0))
         self._cache_bar = ttk.Progressbar(win, maximum=100, value=0)
         self._cache_bar.pack(fill="x", padx=12, pady=(6, 4))
-        self._cache_prog = tk.Label(win, text="尚未开始", anchor="w", font=("微软雅黑", 9))
+        self._cache_prog = tk.Label(win, text=_T("尚未开始"), anchor="w", font=("微软雅黑", 9))
         self._cache_prog.pack(fill="x", padx=12)
-        self._cache_disk = tk.Label(win, text="缓存已占容量：0 MB", anchor="w", fg="#1a6bbd", font=("微软雅黑", 9))
+        self._cache_disk = tk.Label(win, text=_T("缓存已占容量：0 MB"), anchor="w", fg="#1a6bbd", font=("微软雅黑", 9))
         self._cache_disk.pack(fill="x", padx=12, pady=(2, 4))
 
-        tk.Label(win, text="选择要缓存的章节（Ctrl/Shift 可多选）：", anchor="w").pack(
+        tk.Label(win, text=_T("选择要缓存的章节（Ctrl/Shift 可多选）："), anchor="w").pack(
             fill="x", padx=12, pady=(8, 2)
         )
         sel_frame = tk.Frame(win)
@@ -525,26 +526,26 @@ class DownloadMixin:
         btns = tk.Frame(win)
         btns.pack(fill="x", padx=12, pady=6)
         cur = self.chapter_idx if bid == self.current_bid else 0
-        tk.Button(btns, text="全选", width=8, command=lambda: self._cache_select_all()).pack(side="left")
-        tk.Button(btns, text="反选", width=8, command=lambda: self._cache_select_invert()).pack(side="left", padx=4)
-        tk.Button(btns, text="从本章起", width=8, command=lambda: self._cache_select_from(cur)).pack(side="left", padx=4)
-        tk.Label(btns, text="续传：已缓存过的句子自动跳过，无需重复下载", fg="#888888", font=("微软雅黑", 8)).pack(side="right")
+        tk.Button(btns, text=_T("全选"), width=8, command=lambda: self._cache_select_all()).pack(side="left")
+        tk.Button(btns, text=_T("反选"), width=8, command=lambda: self._cache_select_invert()).pack(side="left", padx=4)
+        tk.Button(btns, text=_T("从本章起"), width=9, command=lambda: self._cache_select_from(cur)).pack(side="left", padx=4)
+        tk.Label(btns, text=_T("续传：已缓存过的句子自动跳过，无需重复下载"), fg="#888888", font=("微软雅黑", 8)).pack(side="right")
 
         self._cache_shutdown_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             win,
-            text="缓存完成后自动关机（60 秒倒计时，可运行 shutdown /a 取消）",
+            text=_T("缓存完成后自动关机（60 秒倒计时，可运行 shutdown /a 取消）"),
             variable=self._cache_shutdown_var,
             command=self._cache_sync_shutdown,
         ).pack(anchor="w", padx=12, pady=(2, 2))
 
         ops = tk.Frame(win)
         ops.pack(fill="x", padx=12, pady=(6, 10))
-        self._cache_play_btn = tk.Button(ops, text="▶ 开始缓存", width=14, command=self._cache_start)
+        self._cache_play_btn = tk.Button(ops, text=_T("▶ 开始缓存"), width=14, command=self._cache_start)
         self._cache_play_btn.pack(side="left")
-        self._cache_stop_btn = tk.Button(ops, text="停止", width=8, command=self._cache_stop, state="disabled")
+        self._cache_stop_btn = tk.Button(ops, text=_T("停止"), width=8, command=self._cache_stop, state="disabled")
         self._cache_stop_btn.pack(side="left", padx=6)
-        tk.Button(ops, text="关闭", width=8, command=win.destroy).pack(side="right")
+        tk.Button(ops, text=_T("关闭"), width=8, command=win.destroy).pack(side="right")
 
         self._cache_select_all()
         win.protocol("WM_DELETE_WINDOW", win.destroy)
@@ -599,7 +600,7 @@ class DownloadMixin:
             return
         idx = self._cache_selected()
         if idx == set() or (idx is not None and len(idx) == 0):
-            messagebox.showinfo("提示", "请先选择至少一个要缓存的章节", parent=self._cache_book_dlg)
+            messagebox.showinfo(_T("提示"), "请先选择至少一个要缓存的章节", parent=self._cache_book_dlg)
             return
         st = self.tts.start_book_cache(book, bid, idx)
         if st is None:
@@ -612,7 +613,7 @@ class DownloadMixin:
             )
             return
         if st["state"] == "unavailable":
-            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
+            messagebox.showinfo(_T("提示"), "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
             return
         self._book_cache_done_flashed = False
         self._cache_sync_shutdown()
@@ -653,10 +654,10 @@ class DownloadMixin:
             )
             return
         if st.get("state") == "unavailable":
-            messagebox.showinfo("提示", "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
+            messagebox.showinfo(_T("提示"), "当前书籍暂无可缓存的章节", parent=self._cache_book_dlg)
             return
         if st.get("state") == "done":
-            messagebox.showinfo("提示", "所有章节均已缓存完成。", parent=self._cache_book_dlg)
+            messagebox.showinfo(_T("提示"), "所有章节均已缓存完成。", parent=self._cache_book_dlg)
             return
         self._book_cache_done_flashed = False
         self._cache_sync_shutdown()
@@ -673,16 +674,16 @@ class DownloadMixin:
         if play is None or stop is None:
             return
         if state in ("caching", "building"):
-            play.configure(text="⏸ 暂停", command=self._cache_pause, state="normal")
+            play.configure(text=_T("⏸ 暂停"), command=self._cache_pause, state="normal")
             stop.configure(state="normal")
         elif state == "paused":
-            play.configure(text="▶ 继续", command=self._cache_continue, state="normal")
+            play.configure(text=_T("▶ 继续"), command=self._cache_continue, state="normal")
             stop.configure(state="normal")
         elif state == "done":
-            play.configure(text="✔ 已完成", command=None, state="disabled")
+            play.configure(text=_T("✔ 已完成"), command=None, state="disabled")
             stop.configure(state="disabled")
         else:
-            play.configure(text="▶ 开始缓存", command=self._cache_start, state="normal")
+            play.configure(text=_T("▶ 开始缓存"), command=self._cache_start, state="normal")
             stop.configure(state="disabled")
     def _cache_tick(self, win):
         """单书缓存窗口周期刷新进度/容量/按钮状态。"""
@@ -699,7 +700,7 @@ class DownloadMixin:
             state, done, total = st["state"], st["done"], st["total"]
             if state == "building" or total == 0:
                 self._cache_bar.configure(value=0)
-                self._cache_prog.configure(text="正在准备缓存任务…")
+                self._cache_prog.configure(text=_T("正在准备缓存任务…"))
             else:
                 pct = done / total * 100
                 self._cache_bar.configure(value=pct)
@@ -710,13 +711,13 @@ class DownloadMixin:
                 elif state == "done":
                     self._cache_prog.configure(text=f"全部完成：共 {done}/{total} 句")
                 elif state == "cancelled":
-                    self._cache_prog.configure(text="已取消")
+                    self._cache_prog.configure(text=_T("已取消"))
                 else:
                     self._cache_prog.configure(text=f"已就绪（现有 {done}/{total} 句，可续传）")
             disk = self.tts.book_cache_disk_used(self._cache_mgr_target_bid)
             self._cache_disk.configure(text=f"缓存已占容量：{disk / 1048576:.1f} MB")
         else:
-            self._cache_prog.configure(text="尚未开始")
+            self._cache_prog.configure(text=_T("尚未开始"))
         self._cache_sync_state()
         try:
             if win.winfo_exists():

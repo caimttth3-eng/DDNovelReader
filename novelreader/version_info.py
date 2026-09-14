@@ -7,6 +7,16 @@ APP_NAME = "多多朗读"
 VERSION_HISTORY = [
 
     {
+        "version": "2.0",
+        "date": "2026-09-14",
+        "changes": [
+            "新增界面英文版：支持 中文 / English 双语界面，关于界面『界面语言』下拉切换、重启生效；主界面全部按钮/菜单/状态、下载管理器、导入、搜索、书签、定时、缓存管理等对话框均已英文化",
+            "书页配色四项（白天/护眼/夜间/米黄）与书架列头英文显示，存储键不变",
+            "快捷键说明改为中英双语显示，不再受界面语言影响",
+            "关于界面副标题改为跨平台表述（Windows / macOS / Linux / Android），并新增『软件发布』链接一键打开 GitHub 主页",
+        ],
+    },
+    {
         "version": "1.99V5",
         "date": "2026-09-14",
         "changes": [
@@ -260,35 +270,35 @@ VERSION_HISTORY = [
 
 SHORTCUTS = [
     # 文件 / 书架
-    ("Ctrl+O", "添加书籍"),
-    ("Ctrl+B", "收起 / 展开书架"),
+    ("Ctrl+O", "添加书籍", "Add book"),
+    ("Ctrl+B", "收起 / 展开书架", "Collapse / expand shelf"),
     # 导航 / 视图
-    ("Ctrl+L", "打开 / 收起目录"),
-    ("Ctrl+PageUp / Ctrl+PageDown", "上一章 / 下一章"),
-    ("F11 / Alt+Enter", "进入 / 退出全屏"),
-    ("Esc", "退出全屏"),
+    ("Ctrl+L", "打开 / 收起目录", "Open / close TOC"),
+    ("Ctrl+PageUp / Ctrl+PageDown", "上一章 / 下一章", "Previous / next chapter"),
+    ("F11 / Alt+Enter", "进入 / 退出全屏", "Enter / exit fullscreen"),
+    ("Esc", "退出全屏", "Exit fullscreen"),
     # 朗读
-    ("Space / Ctrl+P", "开始 / 暂停 / 继续朗读"),
-    ("Ctrl+S", "停止朗读"),
-    ("Ctrl+R", "从当前屏顶部段落开始朗读"),
+    ("Space / Ctrl+P", "开始 / 暂停 / 继续朗读", "Start / pause / resume reading"),
+    ("Ctrl+S", "停止朗读", "Stop reading"),
+    ("Ctrl+R", "从当前屏顶部段落开始朗读", "Read from top of screen"),
     # 排版
-    ("+ / -（主键盘或小键盘）", "增大 / 减小字号"),
-    ("0", "重置字号为默认"),
-    ("Ctrl++ / Ctrl+- / Ctrl+0", "增大 / 减小 / 重置字号（组合键兼容）"),
-    ("Ctrl+Alt+Plus / Ctrl+Alt+Minus", "增大 / 减小行距"),
-    ("Ctrl+M", "循环切换空行压缩模式（不压缩 / 合并 / 清理）"),
+    ("+ / -（主键盘或小键盘）", "增大 / 减小字号", "Increase / decrease font size"),
+    ("0", "重置字号为默认", "Reset font size to default"),
+    ("Ctrl++ / Ctrl+- / Ctrl+0", "增大 / 减小 / 重置字号（组合键兼容）", "Font size up / down / reset (compat)"),
+    ("Ctrl+Alt+Plus / Ctrl+Alt+Minus", "增大 / 减小行距", "Increase / decrease line spacing"),
+    ("Ctrl+M", "循环切换空行压缩模式（不压缩 / 合并 / 清理）", "Cycle blank-line mode (keep / merge / flatten)"),
     # 朗读参数
-    ("Ctrl+↑ / Ctrl+↓", "增大 / 减小音量"),
-    ("Ctrl+← / Ctrl+→", "减慢 / 加快语速"),
+    ("Ctrl+↑ / Ctrl+↓", "增大 / 减小音量", "Increase / decrease volume"),
+    ("Ctrl+← / Ctrl+→", "减慢 / 加快语速", "Slow down / speed up rate"),
     # 书页配色
-    ("Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4", "书页配色：白天 / 护眼 / 夜间 / 米黄"),
+    ("Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4", "书页配色：白天 / 护眼 / 夜间 / 米黄", "Page theme: Day / Eye / Night / Cream"),
     # 功能
-    ("Ctrl+D", "整本缓存（下载管理器）"),
-    ("Ctrl+T", "定时停止朗读"),
+    ("Ctrl+D", "整本缓存（下载管理器）", "Download manager"),
+    ("Ctrl+T", "定时停止朗读", "Timer stop"),
     # 阅读区
-    ("↑ / ↓", "阅读区上下滚动"),
-    ("PageUp / PageDown", "阅读区上一页 / 下一页"),
-    ("Home / End", "跳到章节开头 / 结尾"),
+    ("↑ / ↓", "阅读区上下滚动", "Scroll up / down"),
+    ("PageUp / PageDown", "阅读区上一页 / 下一页", "Previous / next page"),
+    ("Home / End", "跳到章节开头 / 结尾", "Jump to chapter start / end"),
 ]
 
 

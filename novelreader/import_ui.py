@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """书籍导入：阅读区右键菜单 / 拖拽导入 / 批量导入 / 重复确认 / 删除书籍（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -81,7 +82,7 @@ class ImportMixin:
         if not t:
             t = self._snippet_under_cursor()
         if not t:
-            messagebox.showinfo("提示", "请先在阅读区选中文字，或右键点击某一行。")
+            messagebox.showinfo(_T("提示"), "请先在阅读区选中文字，或右键点击某一行。")
             return
         q = urllib.parse.quote(t)
         urls = {
@@ -118,7 +119,7 @@ class ImportMixin:
         except Exception as e:
             try:
                 if self.root.winfo_exists():
-                    messagebox.showerror("拖拽导入失败", str(e))
+                    messagebox.showerror(_T("拖拽导入失败"), str(e))
             except Exception:
                 pass
     def _handle_dropped_files(self, paths):
@@ -139,11 +140,11 @@ class ImportMixin:
         except Exception as e:
             try:
                 if self.root.winfo_exists():
-                    messagebox.showerror("拖拽导入失败", str(e))
+                    messagebox.showerror(_T("拖拽导入失败"), str(e))
             except Exception:
                 pass
     def _add_book(self):
-        paths = filedialog.askopenfilenames(title="选择要加入书架的小说（可多选）", filetypes=FILE_TYPES)
+        paths = filedialog.askopenfilenames(title=_T("选择要加入书架的小说（可多选）"), filetypes=FILE_TYPES)
         if not paths:
             return
         paths = [p for p in paths if p]
@@ -183,14 +184,14 @@ class ImportMixin:
                  font=("微软雅黑", 10, "bold")).pack(pady=(14, 6), anchor="w", padx=16)
         tk.Label(dlg, text=names, fg="#444444", font=("微软雅黑", 9),
                  justify="left", anchor="w").pack(padx=20, anchor="w")
-        tk.Label(dlg, text="确认选中的是小说文件？",
+        tk.Label(dlg, text=_T("确认选中的是小说文件？"),
                  fg="#666666", font=("微软雅黑", 9)).pack(pady=(8, 4))
         result = [None]
         ops = tk.Frame(dlg)
         ops.pack(pady=6)
-        tk.Button(ops, text="确认导入", width=10,
+        tk.Button(ops, text=_T("确认导入"), width=14,
                   command=lambda: (result.__setitem__(0, True), dlg.destroy())).pack(side="left", padx=6)
-        tk.Button(ops, text="取消", width=8,
+        tk.Button(ops, text=_T("取消"), width=8,
                   command=dlg.destroy).pack(side="left", padx=6)
         self.root.wait_window(dlg)
         if result[0]:
@@ -211,7 +212,7 @@ class ImportMixin:
             try:
                 content = self._load_book(path)
             except Exception as e:
-                messagebox.showerror("无法打开", f"读取缓存失败：\n{e}")
+                messagebox.showerror(_T("无法打开"), f"读取缓存失败：\n{e}")
                 return
             self._save_import(content, path)
             self._refresh_bookshelf()
@@ -234,15 +235,15 @@ class ImportMixin:
             pass
         result = [None]
         tk.Label(dlg, text=f"「{title}」已在书架中", font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
-        tk.Label(dlg, text="覆盖：沿用已有分章解析，立即完成；\n重新预处理：丢弃旧解析重新分章（长篇耗时较久）。",
+        tk.Label(dlg, text=_T("覆盖：沿用已有分章解析，立即完成；\n重新预处理：丢弃旧解析重新分章（长篇耗时较久）。"),
                  fg="#666666", font=("微软雅黑", 9)).pack(pady=(2, 8))
         ops = tk.Frame(dlg)
         ops.pack(pady=6)
-        tk.Button(ops, text="覆盖", width=10,
+        tk.Button(ops, text=_T("覆盖"), width=10,
                   command=lambda: (result.__setitem__(0, "overwrite"), dlg.destroy())).pack(side="left", padx=6)
-        tk.Button(ops, text="重新预处理文本", width=14,
+        tk.Button(ops, text=_T("重新预处理文本"), width=14,
                   command=lambda: (result.__setitem__(0, "reparse"), dlg.destroy())).pack(side="left", padx=6)
-        tk.Button(ops, text="取消", width=8, command=dlg.destroy).pack(side="left", padx=6)
+        tk.Button(ops, text=_T("取消"), width=8, command=dlg.destroy).pack(side="left", padx=6)
         self.root.wait_window(dlg)
         return result[0]
     def _reprocess_book(self, path, bid):
@@ -257,7 +258,7 @@ class ImportMixin:
             win.grab_set()
         except Exception:
             pass
-        tk.Label(win, text="正在重新解析并分章，请稍候…", font=("微软雅黑", 11)).pack(pady=(18, 8))
+        tk.Label(win, text=_T("正在重新解析并分章，请稍候…"), font=("微软雅黑", 11)).pack(pady=(18, 8))
         bar = ttk.Progressbar(win, mode="indeterminate")
         bar.pack(fill="x", padx=28)
         bar.start(12)
@@ -289,7 +290,7 @@ class ImportMixin:
                 self.open_book(bid)
                 self._flash_status(f"已重新预处理「{content.title}」")
             else:
-                messagebox.showerror("解析失败", msg[1])
+                messagebox.showerror(_T("解析失败"), msg[1])
 
         win.after(100, poll)
     def _save_import(self, content, path):
@@ -345,7 +346,7 @@ class ImportMixin:
             win.grab_set()  # 模态，防止导入期间误操作
         except Exception:
             pass
-        tk.Label(win, text="正在解析并分章，请稍候…", font=("微软雅黑", 11)).pack(pady=(16, 6))
+        tk.Label(win, text=_T("正在解析并分章，请稍候…"), font=("微软雅黑", 11)).pack(pady=(16, 6))
         prog_var = tk.DoubleVar(value=0)
         bar = ttk.Progressbar(win, maximum=total, variable=prog_var)
         bar.pack(fill="x", padx=28)
@@ -388,15 +389,15 @@ class ImportMixin:
             pass
         result = [None]
         tk.Label(dlg, text=f"所选文件中有 {count} 本已在书架中", font=("微软雅黑", 10, "bold")).pack(pady=(16, 4))
-        tk.Label(dlg, text="全部覆盖：沿用已有分章解析，立即完成；\n全部重新预处理：丢弃旧解析重新分章（长篇耗时较久）。",
+        tk.Label(dlg, text=_T("全部覆盖：沿用已有分章解析，立即完成；\n全部重新预处理：丢弃旧解析重新分章（长篇耗时较久）。"),
                  fg="#666666", font=("微软雅黑", 9)).pack(pady=(2, 8))
         ops = tk.Frame(dlg)
         ops.pack(pady=6)
-        tk.Button(ops, text="全部覆盖", width=10,
+        tk.Button(ops, text=_T("全部覆盖"), width=13,
                   command=lambda: (result.__setitem__(0, "overwrite"), dlg.destroy())).pack(side="left", padx=6)
-        tk.Button(ops, text="全部重新预处理", width=14,
+        tk.Button(ops, text=_T("全部重新预处理"), width=14,
                   command=lambda: (result.__setitem__(0, "reparse"), dlg.destroy())).pack(side="left", padx=6)
-        tk.Button(ops, text="取消导入", width=10, command=dlg.destroy).pack(side="left", padx=6)
+        tk.Button(ops, text=_T("取消导入"), width=13, command=dlg.destroy).pack(side="left", padx=6)
         self.root.wait_window(dlg)
         return result[0]
     def _poll_import(self, win, prog_var, info_lbl, name_lbl, total):
@@ -429,7 +430,7 @@ class ImportMixin:
         meta = self.storage.get_book(bid)
         if not meta:
             return
-        label = "删除文件" if clear_cache else "删除书籍"
+        label=_T("删除文件") if clear_cache else "删除书籍"
         tip = ("（从书架移除并清空缓存，不删除原文件）" if clear_cache
                else "（从书架移除，保留缓存，不删除原文件）")
         if not messagebox.askyesno(label, f"确定{label}《{meta.get('title','')}》？\n{tip}"):

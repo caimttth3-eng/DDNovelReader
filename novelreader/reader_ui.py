@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -180,7 +181,7 @@ class ReaderMixin:
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.configure(state="disabled")
-        self.title_label.configure(text="未打开书籍")
+        self.title_label.configure(text=_T("未打开书籍"))
         self.percent_label.configure(text="0.0%")
         self.pos_label.configure(text="")
         self.total_label.configure(text="")
@@ -305,7 +306,7 @@ class ReaderMixin:
     def _read_from_paragraph(self):
         """阅读区右键：从光标所在段落起点开始朗读。"""
         if not self.book:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
             return
         idx = getattr(self, "_ctx_index", None)
         if not idx:

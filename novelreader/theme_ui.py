@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """外观设置：主题 / 书页配色 / 字号 / 行距 / 空行模式 / 停顿间隔（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -76,7 +77,8 @@ class ThemeMixin:
         self.settings["volume"] = v
         self.storage.set_setting("volume", v)
     def _on_theme_change(self, event):
-        theme = self.theme_cb.get()
+        _rev = {_T(k): k for k in THEMES}
+        theme = _rev.get(self.theme_cb.get(), self.theme_cb.get())
         self.settings["theme"] = theme
         self._apply_theme(theme)
         self.storage.set_setting("theme", theme)
@@ -91,7 +93,7 @@ class ThemeMixin:
         self._apply_theme(theme)
         self.storage.set_setting("theme", theme)
         try:
-            self.theme_cb.set(theme)
+            self.theme_cb.set(_T(theme))
         except Exception:
             pass
     def _cycle_paragraph_mode(self):

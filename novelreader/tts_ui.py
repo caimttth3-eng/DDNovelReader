@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """TTS 控制：开始 / 暂停 / 继续 / 停止 / 语速 / 音量 / 语音切换（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .i18n import T as _T
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -39,7 +40,7 @@ class TtsMixin:
     def _tts_toggle(self):
         """开始 / 暂停 / 继续 切换。"""
         if not self.book:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
             return
         if self.tts.is_playing():
             self.tts.pause()
@@ -61,13 +62,13 @@ class TtsMixin:
         self._status_timer = self.root.after(4000, lambda: self.tts_status_label.configure(text=""))
     def _set_tts_ui(self, state):
         if state == "playing":
-            self.tts_toggle_btn.configure(text="⏸ 暂停", state="normal")
+            self.tts_toggle_btn.configure(text=_T("⏸ 暂停"), state="normal")
             self.tts_stop_btn.configure(state="normal")
         elif state == "paused":
-            self.tts_toggle_btn.configure(text="▶ 继续", state="normal")
+            self.tts_toggle_btn.configure(text=_T("▶ 继续"), state="normal")
             self.tts_stop_btn.configure(state="normal")
         else:
-            self.tts_toggle_btn.configure(text="▶ 开始朗读", state="normal")
+            self.tts_toggle_btn.configure(text=_T("▶ 开始朗读"), state="normal")
             self.tts_stop_btn.configure(state="disabled")
     def _poll_tts(self):
         try:
@@ -104,7 +105,7 @@ class TtsMixin:
             except Exception:
                 pass
         if not st:
-            self.tts_cache_btn.configure(text="整本缓存")
+            self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(text="")
             return
         state, done, total = st["state"], st["done"], st["total"]
@@ -126,7 +127,7 @@ class TtsMixin:
                 font=("微软雅黑", 9, "bold"),
             )
         elif state == "done":
-            self.tts_cache_btn.configure(text="整本缓存")
+            self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(
                 text=f"整本缓存完成 {total} 句",
                 fg="#8a5a00",
@@ -136,10 +137,10 @@ class TtsMixin:
                 self._book_cache_done_flashed = True
                 self._flash_status("整本语音缓存完成，朗读将零网络延迟")
         elif state == "cancelled":
-            self.tts_cache_btn.configure(text="整本缓存")
+            self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))
         else:
-            self.tts_cache_btn.configure(text="整本缓存")
+            self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))
     def _change_rate(self, delta):
         rate = max(80, min(400, int(self.settings.get("tts_rate", 200)) + delta))

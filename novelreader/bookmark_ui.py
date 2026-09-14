@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """书签 + 划线高亮 + 备注笔记：阅读区右键标记、目录/书签面板切换、书签高亮渲染、跳转与删除（独立 Mixin，不写入 gui.py）。"""
 import time
 import tkinter as tk
@@ -38,11 +38,11 @@ class BookmarkMixin:
     def _add_bookmark_from_selection(self):
         """阅读区右键：把选中文字存为书签（划线高亮），并弹出备注输入框（默认文本可直接确认）。"""
         if not self.book or not self.current_bid:
-            messagebox.showinfo("提示", "请先从书架打开一本书")
+            messagebox.showinfo(_T("提示"), "请先从书架打开一本书")
             return
         sel = self.text.tag_ranges("sel")
         if not sel:
-            messagebox.showinfo("提示", "请先在阅读区选中要标记的文字，再右键选择『添加书签/划线』")
+            messagebox.showinfo(_T("提示"), "请先在阅读区选中要标记的文字，再右键选择『添加书签/划线』")
             return
         try:
             start, end = sel[0], sel[1]
@@ -50,7 +50,7 @@ class BookmarkMixin:
         except Exception:
             return
         if not text_sel:
-            messagebox.showinfo("提示", "选中的内容为空")
+            messagebox.showinfo(_T("提示"), "选中的内容为空")
             return
         off = self._idx_to_raw_offset(start)
         off_e = self._idx_to_raw_offset(end)
@@ -68,7 +68,7 @@ class BookmarkMixin:
         dlg.transient(self.root)
         self._center_window(dlg)
         dlg.configure(bg=self._dialog_bg())
-        tk.Label(dlg, text="书签备注（默认取选中文字，可直接确认）：", bg=self._dialog_bg(),
+        tk.Label(dlg, text=_T("书签备注（默认取选中文字，可直接确认）："), bg=self._dialog_bg(),
                  font=("微软雅黑", 10)).pack(anchor="w", padx=16, pady=(14, 6))
         default_note = (text_sel[:30] + "…") if len(text_sel) > 30 else text_sel
         var = tk.StringVar(value=default_note)
@@ -104,8 +104,8 @@ class BookmarkMixin:
 
         ops = tk.Frame(dlg, bg=self._dialog_bg())
         ops.pack(pady=12)
-        tk.Button(ops, text="确定", width=10, command=do_save).pack(side="left", padx=8)
-        tk.Button(ops, text="取消", width=10, command=dlg.destroy).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("确定"), width=10, command=do_save).pack(side="left", padx=8)
+        tk.Button(ops, text=_T("取消"), width=10, command=dlg.destroy).pack(side="left", padx=8)
         dlg.bind("<Return>", do_save)
 
     def _dialog_bg(self):
@@ -236,7 +236,7 @@ class BookmarkMixin:
             self.chapter_list.selection_clear(0, "end")
             self.chapter_list.selection_set(iid)
             menu = tk.Menu(self.root, tearoff=0)
-            menu.add_command(label="删除该书签", command=lambda: self._remove_bookmark_at(iid))
+            menu.add_command(label=_T("删除该书签"), command=lambda: self._remove_bookmark_at(iid))
             try:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:

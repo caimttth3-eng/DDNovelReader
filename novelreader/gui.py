@@ -51,6 +51,8 @@ class NovelReaderBase:
         self._title_char_len = 0       # 章节标题+换行的字符数，用于位置换算
         self._body_start_line = 1      # 正文在显示文本中的起始行号
         self.settings = dict(self.storage.settings())
+        from .i18n import set_lang as _set_lang
+        _set_lang(self.settings.get("ui_lang", "zh"))
         self._save_timer = None
         self._cache = {}
         self._chapter_sel_busy = False
@@ -122,7 +124,7 @@ class NovelReaderBase:
                 if last and last in self.storage.all_books():
                     self.open_book(last)   # 内部会 _refresh_bookshelf
             else:
-                self.root.title(f"多多朗读 v{__version__}")
+                self.root.title(f"{_T('多多朗读')} v{__version__}")
                 self._refresh_bookshelf()
         finally:
             self._loading_done = True
@@ -222,7 +224,7 @@ class NovelReaderBase:
                 moved = migrate_old_tts_layout(root)
                 if moved:
                     self.root.after(0, lambda: self._flash_status(
-                        f"音频缓存目录已迁移 {moved} 个到新版（按书分目录）结构"))
+                        _T("音频缓存目录已迁移 {moved} 个到新版（按书分目录）结构").format(moved=moved)))
                 self.tts.tts_cache_calibrate()
                 # 校准完成后刷新书架大小列（读索引，快）
                 self.root.after(0, lambda: self._refresh_shelf_sizes_async())
@@ -440,7 +442,7 @@ class NovelReaderBase:
         except Exception:
             pass
     def _build_ui(self):
-        self.root.title(f"多多朗读 v{__version__}")
+        self.root.title(f"{_T('多多朗读')} v{__version__}")
         # 每次启动固定 1280x720 并居中
         self.root.geometry(self._default_geometry())
         icon = self._icon_path()
@@ -470,7 +472,7 @@ class NovelReaderBase:
         left = tk.Frame(self._inner_paned, width=280)
         self._left = left
 
-        shelf_header = tk.Button(left, text="📚 我的书架", font=("微软雅黑", 11, "bold"),
+        shelf_header = tk.Button(left, text=_T("📚 我的书架"), font=("微软雅黑", 11, "bold"),
                                   relief="flat", cursor="hand2", anchor="w",
                                   command=self._open_cache_folder)
         shelf_header.pack(fill="x")
@@ -480,10 +482,10 @@ class NovelReaderBase:
         # 书架用 Treeview（详细信息视图）
         cols = ("progress", "title", "size", "time")
         self.shelf_tree = ttk.Treeview(shelf_frame, columns=cols, show="headings", selectmode="extended")
-        self.shelf_tree.heading("progress", text="进度", command=lambda: self._shelf_sort("progress"))
-        self.shelf_tree.heading("title", text="书名", command=lambda: self._shelf_sort("title"))
-        self.shelf_tree.heading("size", text="大小", command=lambda: self._shelf_sort("size"))
-        self.shelf_tree.heading("time", text="时间", command=lambda: self._shelf_sort("time"))
+        self.shelf_tree.heading("progress", text=_T("进度"), command=lambda: self._shelf_sort("progress"))
+        self.shelf_tree.heading("title", text=_T("书名"), command=lambda: self._shelf_sort("title"))
+        self.shelf_tree.heading("size", text=_T("大小"), command=lambda: self._shelf_sort("size"))
+        self.shelf_tree.heading("time", text=_T("时间"), command=lambda: self._shelf_sort("time"))
         self.shelf_tree.column("progress", width=55, anchor="center", stretch=False)
         self.shelf_tree.column("title", width=160, anchor="w", stretch=True)
         self.shelf_tree.column("size", width=65, anchor="e", stretch=False)
@@ -502,24 +504,24 @@ class NovelReaderBase:
 
         # 书架右键菜单
         self.shelf_menu = tk.Menu(self.root, tearoff=0)
-        self.shelf_menu.add_command(label="打开书籍", command=self._open_selected)
+        self.shelf_menu.add_command(label=_T("打开书籍"), command=self._open_selected)
         self.shelf_menu.add_separator()
-        self.shelf_menu.add_command(label="添加书籍", command=self._add_book)
+        self.shelf_menu.add_command(label=_T("添加书籍"), command=self._add_book)
         self.shelf_menu.add_separator()
-        self.shelf_menu.add_command(label="复制原文件", command=self._copy_book_file)
-        self.shelf_menu.add_command(label="复制书名", command=self._copy_book_title)
+        self.shelf_menu.add_command(label=_T("复制原文件"), command=self._copy_book_file)
+        self.shelf_menu.add_command(label=_T("复制书名"), command=self._copy_book_title)
         self.shelf_menu.add_separator()
-        self.shelf_menu.add_command(label="删除（保留缓存）", command=lambda: self._remove_book(False))
-        self.shelf_menu.add_command(label="删除文件（清空缓存）", command=lambda: self._remove_book(True))
+        self.shelf_menu.add_command(label=_T("删除（保留缓存）"), command=lambda: self._remove_book(False))
+        self.shelf_menu.add_command(label=_T("删除文件（清空缓存）"), command=lambda: self._remove_book(True))
 
         btn_row = tk.Frame(left)
         btn_row.pack(fill="x")
-        ttk.Button(btn_row, text="＋ 添加书籍", command=self._add_book).pack(fill="x", pady=2)
+        ttk.Button(btn_row, text=_T("＋ 添加书籍"), command=self._add_book).pack(fill="x", pady=2)
         back_row = tk.Frame(left)
         back_row.pack(fill="x")
-        ttk.Button(back_row, text="备份书架", command=self._backup_library).pack(
+        ttk.Button(back_row, text=_T("备份书架"), command=self._backup_library).pack(
             side="left", fill="x", expand=True, pady=2, padx=(0, 2))
-        ttk.Button(back_row, text="还原书架", command=self._restore_library).pack(
+        ttk.Button(back_row, text=_T("还原书架"), command=self._restore_library).pack(
             side="left", fill="x", expand=True, pady=2, padx=(2, 0))
         self._shelf_visible = False
 
@@ -553,25 +555,25 @@ class NovelReaderBase:
 
         # 阅读区右键菜单
         self.text_menu = tk.Menu(self.root, tearoff=0)
-        self.text_menu.add_command(label="复制", command=self._copy_selection)
-        self.text_menu.add_command(label="🔖 添加书签/划线", command=self._add_bookmark_from_selection)
-        self.text_menu.add_command(label="从该段开始朗读", command=self._read_from_paragraph)
+        self.text_menu.add_command(label=_T("复制"), command=self._copy_selection)
+        self.text_menu.add_command(label=_T("🔖 添加书签/划线"), command=self._add_bookmark_from_selection)
+        self.text_menu.add_command(label=_T("从该段开始朗读"), command=self._read_from_paragraph)
         self.text_menu.add_separator()
-        self.text_menu.add_command(label="百度搜索", command=lambda: self._search_selection("baidu"))
-        self.text_menu.add_command(label="谷歌搜索", command=lambda: self._search_selection("google"))
-        self.text_menu.add_command(label="必应搜索", command=lambda: self._search_selection("bing"))
+        self.text_menu.add_command(label=_T("百度搜索"), command=lambda: self._search_selection("baidu"))
+        self.text_menu.add_command(label=_T("谷歌搜索"), command=lambda: self._search_selection("google"))
+        self.text_menu.add_command(label=_T("必应搜索"), command=lambda: self._search_selection("bing"))
         self.text_menu.add_separator()
-        self.text_menu.add_command(label="翻译", command=lambda: self._search_selection("translate"))
+        self.text_menu.add_command(label=_T("翻译"), command=lambda: self._search_selection("translate"))
 
         # 目录（内层 PanedWindow 的第二个窗格，可开关）
         self.chapter_panel = tk.Frame(self._inner_paned, width=220)
         # 顶部：目录 / 书签 切换按钮（与目录共用同一面板区域）
         panel_bar = tk.Frame(self.chapter_panel)
         panel_bar.pack(fill="x")
-        self._panel_toc_btn = tk.Button(panel_bar, text="目录", relief="sunken",
+        self._panel_toc_btn = tk.Button(panel_bar, text=_T("目录"), relief="sunken",
                                         command=lambda: self._set_panel_mode("toc"))
         self._panel_toc_btn.pack(side="left", fill="x", expand=True)
-        self._panel_bm_btn = tk.Button(panel_bar, text="书签", relief="raised",
+        self._panel_bm_btn = tk.Button(panel_bar, text=_T("书签"), relief="raised",
                                        command=lambda: self._set_panel_mode("bookmark"))
         self._panel_bm_btn.pack(side="left", fill="x", expand=True)
         self._panel_mode = "toc"
@@ -645,28 +647,28 @@ class NovelReaderBase:
 
         # 统一小字灰色标签，避免与正文主题混淆
         def _lbl(owner, text, fg="#6a6a6a"):
-            tk.Label(owner, text=text, font=("微软雅黑", 9), fg=fg).pack(side="left")
+            tk.Label(owner, text=_T(text), font=("微软雅黑", 9), fg=fg).pack(side="left")
 
         # ---- 第 1 行：书名 + 章节导航（左） / 书架、目录、关于（右） ----
         row1 = tk.Frame(bar)
         row1.pack(fill="x", pady=(3, 1))
-        self.title_label = tk.Label(row1, text="未打开书籍", font=("微软雅黑", 13, "bold"))
+        self.title_label = tk.Label(row1, text=_T("未打开书籍"), font=("微软雅黑", 13, "bold"))
         self.title_label.pack(side="left", padx=(0, 4))
         ttk.Separator(row1, orient="vertical").pack(side="left", fill="y", padx=4)
-        ttk.Button(row1, text="◀ 上一章", width=8,
+        ttk.Button(row1, text=_T("◀ 上一章"), width=8,
                    command=lambda: self._goto_chapter(self.chapter_idx - 1)).pack(side="left", padx=1)
         self.chapter_cb = ttk.Combobox(row1, state="readonly", width=24)
         self.chapter_cb.pack(side="left", padx=1)
         self.chapter_cb.bind("<<ComboboxSelected>>", self._on_chapter_cb)
-        ttk.Button(row1, text="下一章 ▶", width=8,
+        ttk.Button(row1, text=_T("下一章 ▶"), width=8,
                    command=lambda: self._goto_chapter(self.chapter_idx + 1)).pack(side="left", padx=1)
         right1 = tk.Frame(row1)
         right1.pack(side="right")
-        ttk.Button(right1, text="书架", command=self._toggle_shelf).pack(side="left", padx=2)
-        self.toc_btn = ttk.Button(right1, text="目录", command=self._toggle_toc)
+        ttk.Button(right1, text=_T("书架"), command=self._toggle_shelf).pack(side="left", padx=2)
+        self.toc_btn = ttk.Button(right1, text=_T("目录"), command=self._toggle_toc)
         self.toc_btn.pack(side="left", padx=2)
         ttk.Separator(right1, orient="vertical").pack(side="left", fill="y", padx=4)
-        ttk.Button(right1, text="关于", command=self._show_about).pack(side="left", padx=2)
+        ttk.Button(right1, text=_T("关于"), command=self._show_about).pack(side="left", padx=2)
 
         # ---- 第 2 行：排版外观 ----
         row2 = tk.Frame(bar)
@@ -693,25 +695,25 @@ class NovelReaderBase:
         _lbl(row2, "空行")
         self.paragraph_cb = ttk.Combobox(
             row2, state="readonly", width=9,
-            values=["不压缩", "合并为一行", "清理所有行"],
+            values=[_T("不压缩"), _T("合并为一行"), _T("清理所有行")],
         )
         self.paragraph_cb.pack(side="left", padx=(2, 8))
         self.paragraph_cb.bind("<<ComboboxSelected>>", self._on_paragraph_mode)
 
         _lbl(row2, "书页")
-        self.theme_cb = ttk.Combobox(row2, state="readonly", values=list(THEMES.keys()), width=5)
+        self.theme_cb = ttk.Combobox(row2, state="readonly", values=[_T(k) for k in THEMES], width=6)
         self.theme_cb.pack(side="left", padx=(2, 0))
         self.theme_cb.bind("<<ComboboxSelected>>", self._on_theme_change)
-        ttk.Button(row2, text="🔍 搜索", command=self._open_search_dialog).pack(side="left", padx=(8, 0))
+        ttk.Button(row2, text=_T("🔍 搜索"), command=self._open_search_dialog).pack(side="left", padx=(8, 0))
 
         # ---- 第 3 行：朗读控制 ----
         row3 = tk.Frame(bar)
         row3.pack(fill="x", pady=(1, 3))
         _lbl(row3, "朗读", fg="#999999")
         ttk.Separator(row3, orient="vertical").pack(side="left", fill="y", padx=6)
-        self.tts_toggle_btn = ttk.Button(row3, text="▶ 开始朗读", command=self._tts_toggle)
+        self.tts_toggle_btn = ttk.Button(row3, text=_T("▶ 开始朗读"), command=self._tts_toggle)
         self.tts_toggle_btn.pack(side="left")
-        self.tts_stop_btn = ttk.Button(row3, text="⏹ 结束", command=self._tts_stop, state="disabled")
+        self.tts_stop_btn = ttk.Button(row3, text=_T("⏹ 结束"), command=self._tts_stop, state="disabled")
         self.tts_stop_btn.pack(side="left", padx=4)
         self.tts_status_label = tk.Label(row3, text="", fg="#c0392b")
         self.tts_status_label.pack(side="left", padx=(6, 0))
@@ -748,11 +750,11 @@ class NovelReaderBase:
         self.voice_cb["values"] = self._friendly_voices()
 
         # 整本语音缓存（Edge 神经语音）
-        self.tts_cache_btn = ttk.Button(row4, text="整本缓存", width=8, command=self._open_cache_dialog)
+        self.tts_cache_btn = ttk.Button(row4, text=_T("整本缓存"), width=9, command=self._open_cache_dialog)
         self.tts_cache_btn.pack(side="left", padx=(10, 0))
 
         # 定时停止朗读（分钟）
-        self.timer_btn = ttk.Button(row4, text="定时", width=8, command=self._open_timer_dialog)
+        self.timer_btn = ttk.Button(row4, text=_T("定时"), width=8, command=self._open_timer_dialog)
         self.timer_btn.pack(side="left", padx=(4, 0))
 
         # 工具条与阅读区之间的分隔线
@@ -769,7 +771,7 @@ class NovelReaderBase:
         theme = self.settings.get("theme", "护眼")
         if theme not in THEMES:
             theme = "护眼"
-        self.theme_cb.set(theme)
+        self.theme_cb.set(_T(theme))
         self.rate_label.configure(text=str(self.settings.get("tts_rate", 200)))
         self.tts.set_rate(self.settings.get("tts_rate", 200))
         self.tts.set_sentence_gap(self.settings.get("tts_sentence_gap", 0.10))
@@ -816,7 +818,7 @@ class NovelReaderBase:
         for v in sapi:
             self._voice_ids.append(v)
             name = v.split("\\")[-1] if "\\" in v else v
-            names.append(f"本地·{name} | {v}")
+            names.append(f"{_T('本地')}·{name} | {v}")
         return names
     def _apply_theme(self, theme):
         t = THEMES[theme]
@@ -941,6 +943,7 @@ from .shortcuts_ui import ShortcutsMixin
 from .bookmark_ui import BookmarkMixin
 from .search_ui import SearchMixin
 from .media_keys import MediaKeysMixin
+from .i18n import T as _T
 
 
 class NovelReaderApp(

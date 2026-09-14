@@ -141,9 +141,16 @@ class Storage:
 
     def save(self):
         tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, self.path)
+        for _attempt in range(4):
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(self.data, f, ensure_ascii=False, indent=1)
+                os.replace(tmp, self.path)
+                return
+            except (PermissionError, OSError):
+                if _attempt == 3:
+                    raise
+                time.sleep(0.12)
 
     # ---------- 设置 ----------
     def get_setting(self, key, default=None):
