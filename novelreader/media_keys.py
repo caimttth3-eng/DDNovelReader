@@ -64,8 +64,14 @@ class MediaKeysMixin:
                             if self._media_keys_foreground():
                                 self.root.after(0, self._tts_stop)
                                 return 1
-                except Exception:
-                    pass
+                except Exception as _e:
+                    try:
+                        import tempfile, traceback
+                        with open(os.path.join(tempfile.gettempdir(), "ddnr_mk.log"), "a", encoding="utf-8") as _f:
+                            _f.write("HOOK EXC: %r\n" % (_e,))
+                            _f.write(traceback.format_exc() + "\n")
+                    except Exception:
+                        pass
                 return user32.CallNextHookEx(
                     self._mk_hook, n_code, w_param,
                     ctypes.cast(l_param, ctypes.c_void_p).value)
