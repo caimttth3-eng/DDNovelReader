@@ -72,8 +72,6 @@ class NovelReaderBase:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # 蓝牙耳机 / 键盘多媒体键（播放/暂停、停止）→ 朗读控制（仅 Windows）
         self._install_media_keys()
-        # 蓝牙耳机 / 键盘多媒体键（播放/暂停、停止）→ 朗读控制（仅 Windows）
-        self._install_media_keys()
 
         # 先让窗口显示：阅读区放加载占位并立即布局。若在窗口未映射时调用
         # Text.see() 会触发全量布局重算（实测可达 9-11 秒），造成启动白屏卡顿；
@@ -921,6 +919,11 @@ class NovelReaderBase:
             pass
         try:
             self.storage.set_setting("window_geometry", self.root.geometry())
+        except Exception:
+            pass
+        # 卸载多媒体键子类化，避免窗口销毁后残留回调
+        try:
+            self._on_media_keys_destroy()
         except Exception:
             pass
         self.root.destroy()
