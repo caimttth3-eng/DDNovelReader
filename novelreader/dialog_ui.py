@@ -99,6 +99,18 @@ class DialogMixin:
         tk.Label(info, text="反馈问题可以在B站动态留言，B站我天天看。", fg="#8a5a00", bg=_about_bg,
                  font=("微软雅黑", 9)).pack(anchor="w", pady=(4, 0))
 
+        dy_row = tk.Frame(info, bg=_about_bg)
+        dy_row.pack(anchor="w", pady=(2, 0))
+        tk.Label(dy_row, text="抖音号：", fg="#555555", bg=_about_bg,
+                 font=("微软雅黑", 10)).pack(side="left")
+        self._dy_label = tk.Label(
+            dy_row, text="120735162", fg="#2b6cb0", bg=_about_bg,
+            font=("微软雅黑", 10, "underline"), cursor="hand2")
+        self._dy_label.pack(side="left")
+        self._dy_label.bind("<Button-1>", lambda e: self._copy_douyin())
+        tk.Label(dy_row, text="（点击复制）", fg="#999999", bg=_about_bg,
+                 font=("微软雅黑", 9)).pack(side="left", padx=(6, 0))
+
         nb = ttk.Notebook(top)
         nb.pack(fill="both", expand=True, padx=12, pady=(4, 12))
 
@@ -293,6 +305,29 @@ class DialogMixin:
         """打开作者 B 站空间。"""
         import webbrowser
         webbrowser.open("https://space.bilibili.com/42444")
+
+    def _copy_douyin(self):
+        """复制作者抖音号到剪贴板。"""
+        dy = "120735162"
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(dy)
+            lbl = self._dy_label
+            try:
+                lbl.configure(text="已复制 ✓")
+
+                def _restore():
+                    try:
+                        if lbl.winfo_exists():
+                            lbl.configure(text=dy)
+                    except Exception:
+                        pass
+
+                self.root.after(1500, _restore)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _copy_email(self):
         """复制作者邮箱到剪贴板。"""
