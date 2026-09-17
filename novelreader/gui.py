@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """主界面基类：启动加载 + UI 构建 + 公共工具（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -819,6 +819,9 @@ class NovelReaderBase:
                 idx = 0
             else:
                 idx = getattr(self, "_first_sapi_idx", 0)
+            if idx >= len(voices):
+                # no local voices -> rollback to first item
+                idx = 0
             self.voice_cb.current(idx)
             self.tts.set_voice(self._voice_ids[idx])
         self._apply_theme(theme)

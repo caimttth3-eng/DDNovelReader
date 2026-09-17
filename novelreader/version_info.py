@@ -1,10 +1,17 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """版本历史与快捷键说明（用于「关于」对话框）。"""
 
 APP_NAME = "多多朗读"
 
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
+    {
+        "version": "2.0V3",
+        "date": "2026-09-17",
+        "changes": [
+            "修复启动崩溃：无本地语音的机器上音色下拉框越界（Index 9 out of range）导致闪退",
+        ],
+    },
     {
         "version": "2.0V2",
         "date": "2026-09-14",
