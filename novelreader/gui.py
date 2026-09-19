@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """主界面基类：启动加载 + UI 构建 + 公共工具（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -666,20 +666,23 @@ class NovelReaderBase:
         def _lbl(owner, text, fg="#6a6a6a"):
             tk.Label(owner, text=_T(text), font=("微软雅黑", 9), fg=fg).pack(side="left")
 
-        # ---- 第 1 行：书名 + 章节导航（左） / 书架、目录、关于（右） ----
+        # ---- 第 1 行：书名 ----
         row1 = tk.Frame(bar)
-        row1.pack(fill="x", pady=(3, 1))
+        row1.pack(fill="x", pady=(3, 0))
         self.title_label = tk.Label(row1, text=_T("未打开书籍"), font=("微软雅黑", 13, "bold"))
         self.title_label.pack(side="left", padx=(0, 4))
-        ttk.Separator(row1, orient="vertical").pack(side="left", fill="y", padx=4)
-        ttk.Button(row1, text=_T("◀ 上一章"), width=8,
+
+        # ---- 第 1.5 行：章节导航（左） / 书架、目录、设置（右） ----
+        row1b = tk.Frame(bar)
+        row1b.pack(fill="x", pady=(0, 1))
+        ttk.Button(row1b, text=_T("◀ 上一章"), width=8,
                    command=lambda: self._goto_chapter(self.chapter_idx - 1)).pack(side="left", padx=1)
-        self.chapter_cb = ttk.Combobox(row1, state="readonly", width=24)
+        self.chapter_cb = ttk.Combobox(row1b, state="readonly", width=24)
         self.chapter_cb.pack(side="left", padx=1)
         self.chapter_cb.bind("<<ComboboxSelected>>", self._on_chapter_cb)
-        ttk.Button(row1, text=_T("下一章 ▶"), width=8,
+        ttk.Button(row1b, text=_T("下一章 ▶"), width=8,
                    command=lambda: self._goto_chapter(self.chapter_idx + 1)).pack(side="left", padx=1)
-        right1 = tk.Frame(row1)
+        right1 = tk.Frame(row1b)
         right1.pack(side="right")
         ttk.Button(right1, text=_T("书架"), command=self._toggle_shelf).pack(side="left", padx=2)
         self.toc_btn = ttk.Button(right1, text=_T("目录"), command=self._toggle_toc)
