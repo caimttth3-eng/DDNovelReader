@@ -73,7 +73,7 @@ class DialogMixin:
             _base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             return os.path.join(_base, "assets", "icons", name + ".png")
 
-        for _n in ("cache", "keyboard", "changelog", "about"):
+        for _n in ("cache", "engine", "keyboard", "changelog", "about"):
             if _n not in self._settings_icons:
                 try:
                     self._settings_icons[_n] = tk.PhotoImage(file=_icon_path(_n))
@@ -82,6 +82,7 @@ class DialogMixin:
 
         entries = [
             ("cache", _T("缓存管理"), _T("正文/音频"), self._show_cache_manager_dialog),
+            ("engine", _T("语音引擎"), _T("外部TTS"), self._show_engines_dialog),
             ("keyboard", _T("快捷键说明"), _T("Ctrl/±"), self._show_shortcuts_dialog),
             ("changelog", _T("更新记录"), _T("版本历史"), self._show_changelog_dialog),
             ("about", _T("关于"), _T("版本/作者"), self._show_about),

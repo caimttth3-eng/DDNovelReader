@@ -9,3 +9,4 @@ comtypes>=1.2
 psutil>=5.9
 tkinterdnd2>=0.4
 pygame>=2.6
+gTTS>=2.5

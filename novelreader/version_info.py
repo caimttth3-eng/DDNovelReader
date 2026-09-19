@@ -1,10 +1,18 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """版本历史与快捷键说明（用于「关于」对话框）。"""
 
 APP_NAME = "多多朗读"
 
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
+    {
+        "version": "2.0V4",
+        "date": "2026-09-20",
+        "changes": [
+            "新增语音引擎面板：设置菜单新增『语音引擎』按钮，可接入本机 GPT-SoVITS 自训练音色，选模型文件自动识别音色名，附一键复制启动命令与图文教程",
+            "跨平台兼容修复：打开缓存文件夹按钮改为 Windows/macOS/Linux 三系统通用（mac 用 open、Linux 用 xdg-open）",
+        ],
+    },
     {
         "version": "2.0V3",
         "date": "2026-09-17",

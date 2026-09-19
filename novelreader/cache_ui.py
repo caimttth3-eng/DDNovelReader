@@ -45,7 +45,13 @@ class CacheMixin:
         d = self._effective_text_cache_root()
         try:
             os.makedirs(d, exist_ok=True)
-            os.startfile(d)
+            import subprocess, sys
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", d])
+            else:
+                subprocess.Popen(["xdg-open", d])
         except Exception as e:
             messagebox.showerror(_T("无法打开"), _T("打开缓存文件夹失败：{e}").format(e=e))
     def _choose_text_cache_folder(self, path_lbl=None, size_lbl=None):
@@ -163,7 +169,13 @@ class CacheMixin:
         d = self._effective_tts_cache_root()
         try:
             os.makedirs(d, exist_ok=True)
-            os.startfile(d)
+            import subprocess, sys
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", d])
+            else:
+                subprocess.Popen(["xdg-open", d])
         except Exception as e:
             messagebox.showerror(_T("无法打开"), _T("打开音频缓存文件夹失败：{e}").format(e=e))
     def _choose_tts_cache_folder(self, path_lbl=None, size_lbl=None):

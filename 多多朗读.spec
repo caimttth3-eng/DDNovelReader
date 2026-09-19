@@ -75,6 +75,7 @@ _hiddenimports = [
     'tkinter.simpledialog', 'tkinter.dnd', '_tkinter',
     'pyttsx3.drivers', 'pyttsx3.drivers.sapi5',
     'edge_tts', 'aiohttp',
+    'gtts', 'gtts.tts',
     'pycaw', 'pycaw.pycaw', 'pycaw.api', 'comtypes', 'psutil',
     'tkinterdnd2',
 ]

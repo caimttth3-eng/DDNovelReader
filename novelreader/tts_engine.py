@@ -21,6 +21,8 @@ import queue
 import re
 import tempfile
 import threading
+import urllib.parse
+import urllib.request
 import time
 import sys
 
@@ -158,6 +160,174 @@ def synth_audio(text, voice, rate=200):
     finally:
         loop.close()
     return bytes(buf)
+
+
+# ---------- 外部 TTS 引擎（VOICEVOX / vits-simple-api / Google / 火山 / OpenAI 兼容 / 自定义） ----------
+# voice_id 编码：ext:<kind>:<urlencoded query>
+
+def _http_read(req, timeout=30, proxy=None):
+    import http.client
+    try:
+        if proxy:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler(
+                {"http": proxy, "https": proxy}))
+            with opener.open(req, timeout=timeout) as resp:
+                return resp.read()
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except http.client.IncompleteRead as e:
+        # GPT-SoVITS 等服务 chunked 结尾不规范，已收到的音频数据照样可用
+        return bytes(e.partial)
+
+
+def synth_external(text, voice_id, rate=200):
+    """外部 TTS 引擎合成一句文本，返回 (audio_bytes, ext)。失败抛异常。"""
+    parts = str(voice_id).split(":", 2)
+    kind = parts[1] if len(parts) > 1 else ""
+    qs = dict(urllib.parse.parse_qsl(parts[2] if len(parts) > 2 else ""))
+    if kind == "voicevox":
+        return _synth_voicevox(text, qs)
+    if kind == "vits":
+        return _synth_vits(text, qs)
+    if kind == "google":
+        return _synth_google(text, qs)
+    if kind == "volcano":
+        return _synth_volcano(text, qs)
+    if kind == "openai":
+        return _synth_openai(text, qs)
+    if kind == "custom":
+        return _synth_custom(text, qs)
+    if kind == "gptsovits":
+        return _synth_gptsovits(text, qs)
+    raise ValueError("unknown external tts engine: " + kind)
+
+
+def _synth_voicevox(text, qs):
+    base = qs.get("base", "http://127.0.0.1:50021").rstrip("/")
+    speaker = qs.get("speaker", "1")
+    proxy = qs.get("proxy") or None
+    data = urllib.parse.urlencode({"text": text, "speaker": speaker}).encode("utf-8")
+    req = urllib.request.Request(base + "/audio_query", data=data, method="POST")
+    query = json.loads(_http_read(req, proxy=proxy).decode("utf-8"))
+    req2 = urllib.request.Request(
+        base + "/synthesis?" + urllib.parse.urlencode({"speaker": speaker}),
+        data=json.dumps(query).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    return _http_read(req2, proxy=proxy), "wav"
+
+
+def _synth_vits(text, qs):
+    base = qs.get("base", "http://127.0.0.1:9880").rstrip("/")
+    sid = qs.get("id", "0")
+    lang = qs.get("lang", "zh")
+    url = base + "/tts?" + urllib.parse.urlencode(
+        {"text": text, "id": sid, "lang": lang, "format": "mp3"})
+    req = urllib.request.Request(url)
+    return _http_read(req, proxy=qs.get("proxy") or None), "mp3"
+
+
+def _synth_google(text, qs):
+    from io import BytesIO
+    from gtts import gTTS
+    buf = BytesIO()
+    proxy = qs.get("proxy") or None
+    if proxy:
+        # gTTS proxy 参数要求 host:port，剥掉 scheme
+        hp = proxy.replace("http://", "").replace("https://", "").rstrip("/")
+        gTTS(text=text, lang=qs.get("lang", "zh-CN"), proxy=hp).write_to_fp(buf)
+    else:
+        gTTS(text=text, lang=qs.get("lang", "zh-CN")).write_to_fp(buf)
+    return buf.getvalue(), "mp3"
+
+
+def _synth_volcano(text, qs):
+    import base64
+    body = {
+        "app": {"appid": qs["appid"], "token": qs["token"],
+                "cluster": qs.get("cluster", "volcano_tts")},
+        "user": {"uid": "ddnr"},
+        "audio": {"voice_type": qs["voice"], "encoding": "mp3"},
+        "request": {"reqid": str(time.time()), "text": text,
+                    "text_type": "plain", "operation": "query"},
+    }
+    req = urllib.request.Request(
+        "https://openspeech.bytedance.com/api/v1/tts",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer;" + qs["token"]}, method="POST")
+    resp = json.loads(_http_read(req, proxy=qs.get("proxy") or None).decode("utf-8"))
+    if resp.get("code") != 3000:
+        raise RuntimeError("volcano tts: " + str(resp.get("message")))
+    return base64.b64decode(resp["data"]), "mp3"
+
+
+def _synth_openai(text, qs):
+    base = qs["base"].rstrip("/")
+    body = {"model": qs.get("model", "tts-1"), "input": text,
+            "voice": qs.get("voice", "alloy"), "response_format": "mp3"}
+    req = urllib.request.Request(
+        base + "/audio/speech", data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + qs["key"]}, method="POST")
+    return _http_read(req, proxy=qs.get("proxy") or None), "mp3"
+
+
+def _synth_custom(text, qs):
+    data = urllib.parse.urlencode(
+        {"text": text, "voice": qs.get("voice", "")}).encode("utf-8")
+    req = urllib.request.Request(qs["url"], data=data)
+    return _http_read(req, proxy=qs.get("proxy") or None), "mp3"
+
+
+_gptsovits_current = None  # 上次已加载的模型签名，避免每句都重新 set_model
+
+
+def _synth_gptsovits(text, qs):
+    """GPT-SoVITS 原生 api.py（GET / 根路由 + /set_model 切音色）。"""
+    global _gptsovits_current
+    base = qs.get("base", "http://127.0.0.1:9880").rstrip("/")
+    proxy = qs.get("proxy") or None
+    gpt = qs.get("gpt", "")
+    sovits = qs.get("sovits", "")
+    sig = (gpt, sovits)
+    if (gpt or sovits) and sig != _gptsovits_current:
+        q = urllib.parse.urlencode({"gpt_model_path": gpt, "sovits_model_path": sovits})
+        try:
+            _http_read(base + "/set_model?" + q, timeout=180, proxy=proxy)
+            _gptsovits_current = sig
+        except Exception:
+            _gptsovits_current = None
+    p = {
+        "text": text,
+        "text_language": qs.get("tl", "zh"),
+        "refer_wav_path": qs.get("ref", ""),
+        "prompt_text": qs.get("pt", ""),
+        "prompt_language": qs.get("pl", "zh"),
+        "speed": "1.0",
+    }
+    req = urllib.request.Request(base + "/?" + urllib.parse.urlencode(p))
+    return _http_read(req, timeout=180, proxy=proxy), "wav"
+
+
+def list_voicevox_speakers(base, proxy=None):
+    """探测 VOICEVOX 音色，返回 [(显示名, speaker_id)]。"""
+    req = urllib.request.Request(base.rstrip("/") + "/speakers")
+    arr = json.loads(_http_read(req, timeout=5, proxy=proxy).decode("utf-8"))
+    out = []
+    for sp in arr:
+        for st in sp.get("styles", []):
+            out.append((f"{sp.get('name','')} ({st.get('name','')})", str(st.get("id"))))
+    return out
+
+
+def list_vits_speakers(base, proxy=None):
+    """探测 vits-simple-api 音色，返回 [(显示名, id)]。"""
+    req = urllib.request.Request(base.rstrip("/") + "/voice_infos")
+    arr = json.loads(_http_read(req, timeout=5, proxy=proxy).decode("utf-8"))
+    out = []
+    for it in arr:
+        out.append((it.get("name") or str(it.get("id")), str(it.get("id"))))
+    return out
 
 
 class _EdgePrefetch:
@@ -621,6 +791,7 @@ class SpeechController:
         self._sentence_gap = 0.10
         self._backend = "sapi"
         self._edge_voice = "zh-CN-XiaoxiaoNeural"
+        self._external_voice = None
         self._edge_prefetch = None
         self._edge_fail_posted = False
         self._tts_cache_dir = None
@@ -675,6 +846,11 @@ class SpeechController:
         if not voice_id:
             return
         with self._cv:
+            if str(voice_id).startswith("ext:"):
+                # 外部 TTS 引擎（VOICEVOX / vits / Google / 火山 / OpenAI / 自定义）
+                self._backend = "external"
+                self._external_voice = voice_id
+                return
             if "HKEY" in voice_id or "TTS_MS" in voice_id or "SOFTWARE" in voice_id:
                 # 系统 SAPI 语音
                 self._backend = "sapi"
@@ -748,6 +924,8 @@ class SpeechController:
         if not self._tts_cache_dir:
             return None
         with self._cv:
+            if self._backend != "edge":
+                return None
             voice = self._edge_voice
             rate = int(self._rate)
         bid = self._book_id or "book"
@@ -1361,7 +1539,7 @@ class SpeechController:
                         "text": text,
                     }
                 )
-                if self._backend == "edge":
+                if self._backend in ("edge", "external"):
                     ok = self._speak_edge(text, gen, ci, orig_off, clean_text, next_clean)
                 else:
                     ok = self._speak_sapi(text, gen)
@@ -1447,11 +1625,16 @@ class SpeechController:
         with self._cv:
             voice = self._edge_voice
             rate = self._rate
+            backend = self._backend
+            ext_voice = self._external_voice
+        if backend == "external":
+            audio, _ext = synth_external(text, ext_voice, rate)
+            return audio
         return synth_audio(text, voice, rate)
 
     def _speak_edge(self, text, gen, ci, off, content, next_off):
         """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。"""
-        cached = self._cached_audio(ci, off)
+        cached = self._cached_audio(ci, off) if self._backend == "edge" else None
         if cached:
             return self._speak_edge_play(cached, gen)
         if self._edge_prefetch is None:
@@ -1509,7 +1692,8 @@ class SpeechController:
             return False
         tmp_path = None
         try:
-            tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+            suffix = ".wav" if audio[:4] == b"RIFF" else ".mp3"
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
             tmp_path = tmp.name
             tmp.write(audio)
             tmp.flush()
@@ -1561,7 +1745,8 @@ def _mci_send(cmd):
 
 def _mci_open(path):
     _mci_close()
-    cmd = f'open "{path}" type mpegvideo alias {_MCI_ALIAS}'
+    mtype = "waveaudio" if path.lower().endswith(".wav") else "mpegvideo"
+    cmd = f'open "{path}" type {mtype} alias {_MCI_ALIAS}'
     err, _ = _mci_send(cmd)
     if err != 0:
         raise RuntimeError(f"MCI open 失败 code={err}")

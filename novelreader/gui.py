@@ -857,6 +857,10 @@ class NovelReaderBase:
             self._voice_ids.append(v)
             name = v.split("\\")[-1] if "\\" in v else v
             names.append(f"{_T('本地')}·{name} | {v}")
+        ext_cfg = self.settings.get("tts_engine_cfg") or {}
+        if ext_cfg.get("enabled") and ext_cfg.get("voice_id"):
+            self._voice_ids.insert(0, ext_cfg["voice_id"])
+            names.insert(0, f"{_T('外部')}·{ext_cfg.get('label', 'TTS')}")
         return names
     def _apply_theme(self, theme):
         t = THEMES[theme]
@@ -981,6 +985,7 @@ from .shortcuts_ui import ShortcutsMixin
 from .bookmark_ui import BookmarkMixin
 from .search_ui import SearchMixin
 from .media_keys import MediaKeysMixin
+from .engine_ui import EngineMixin
 from .i18n import T as _T
 
 
@@ -998,6 +1003,7 @@ class NovelReaderApp(
     BookmarkMixin,
     SearchMixin,
     MediaKeysMixin,
+    EngineMixin,
 ):
     """多多朗读主应用（由基类 + 各功能 Mixin 组装，行为与原单文件一致）。"""
     pass
