@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """版本历史与快捷键说明（用于「关于」对话框）。"""
 
 APP_NAME = "多多朗读"
@@ -343,3 +343,4 @@ def format_history():
             parts.append(f"  · {ch}")
         parts.append("")
     return "\n".join(parts)
+
