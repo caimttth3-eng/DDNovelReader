@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """语音引擎设置（从主设置菜单进入）。
 
 内置 Edge / 系统语音为默认；额外提供「外部 TTS 服务」接入：
@@ -70,7 +70,7 @@ class _EngineDlg:
         wrap.pack(fill="x", padx=16, pady=(12, 4))
         tk.Label(wrap, justify="left", wraplength=620, bg=self._bg, fg="#555555",
                  font=("微软雅黑", 9),
-                 text=_T("默认使用内置 Edge 在线语音 + 系统本地语音。以下引擎需要你自行安装对应软件/服务后，软件会自动调用——软件本身不附带它们。外部引擎仅支持实时朗读，不支持整本语音缓存下载。"),
+                 text=_T("默认使用内置 Edge 在线语音 + 系统本地语音。以下引擎需要你自行安装对应软件/服务后，软件会自动调用——软件本身不附带它们。外部引擎也支持整本语音缓存下载（首次缓存需联网/启动对应服务）。"),
                  ).pack(anchor="w")
 
     # ---------- 主体：左列表 + 右配置 ----------
@@ -322,6 +322,9 @@ class _EngineDlg:
             self._rows["pt"] = self._row(
                 inner, _T("这段参考语音里说的原话（一字不差填进去，音色才像）"),
                 c.get("pt", ""))
+            self._rows["speed"] = self._row(
+                inner, _T("语速（1.0 = 正常，0.5 慢一倍，2.0 快一倍）"),
+                c.get("speed", "1.0"))
 
             def _copy_cmd():
                 cmd = "runtime\python.exe api.py -p 9880"
@@ -346,7 +349,7 @@ class _EngineDlg:
                 "④ 用浏览按钮选一段参考语音：在 logs\你起的音色名\5-wav32k 里挑一段清晰的。\n"
                 "⑤ 把这段语音里说的原话一字不差填到最下面那栏。\n"
                 "⑥ 点保存并使用，就能用你自己训练的音色朗读了。\n"
-                "这是本地服务，不用联网也不用代理。外部音色不支持整本缓存。\n"
+                "这是本地服务，不用联网也不用代理。外部音色也支持整本缓存。\n"
                 "注意：每次开机想用这个音色，都要先做第①步启动服务。"))
             return
 
@@ -358,95 +361,8 @@ class _EngineDlg:
                 "你的服务需接受 POST 表单 text=…&voice=…，响应体直接返回音频（mp3/wav）。"))
             return
 
-        if kind == "gptsovits":
-            GP = r"D:\GPT-SoVITS-v2pro-20250604"
-            PRESETS = {
-                "远坂凛": {
-                    "gpt": GP + r"\GPT_weights_v2Pro\远坂凛-e15.ckpt",
-                    "sovits": GP + r"\SoVITS_weights_v2Pro\远坂凛_e8_s1568.pth",
-                },
-                "弗洛洛": {
-                    "gpt": GP + r"\GPT_weights_v2Pro\弗洛洛-e15.ckpt",
-                    "sovits": GP + r"\SoVITS_weights_v2Pro\弗洛洛_e8_s1568.pth",
-                },
-            }
-            self._rows["base"] = self._row(
-                inner, _T("服务地址"), c.get("base", "http://127.0.0.1:9880"))
-            tk.Label(inner, text=_T("音色（切换自动填入模型路径）"), bg="#FFFFFF",
-                     font=("微软雅黑", 9)).pack(anchor="w", pady=(8, 2))
-            voice = tk.StringVar(value=c.get("voice", "远坂凛"))
-            cb = ttk.Combobox(inner, textvariable=voice, state="readonly",
-                              values=list(PRESETS.keys()), font=("微软雅黑", 10))
-            cb.pack(anchor="w")
-            self._rows["voice"] = voice
-            def _pick(title, exts, key, initialdir=None):
-                from tkinter import filedialog
-                kw = dict(title=title, filetypes=exts)
-                if initialdir:
-                    kw["initialdir"] = initialdir
-                fn = filedialog.askopenfilename(**kw)
-                if fn:
-                    self._rows[key].delete(0, "end")
-                    self._rows[key].insert(0, fn)
 
-            def _path_row(label, val, exts, key, initialdir=None):
-                tk.Label(inner, text=label, bg="#FFFFFF",
-                         font=("微软雅黑", 9)).pack(anchor="w", pady=(6, 2))
-                fr = tk.Frame(inner, bg="#FFFFFF")
-                fr.pack(fill="x", anchor="w")
-                e = tk.Entry(fr, width=46, font=("微软雅黑", 10))
-                e.pack(side="left", padx=(0, 6))
-                e.insert(0, val)
-                tk.Button(fr, text=_T("浏览…"),
-                          command=lambda: _pick(label, exts, key, initialdir),
-                          font=("微软雅黑", 9)).pack(side="left")
-                return e
 
-            self._rows["gpt"] = _path_row(
-                _T("音色模型文件①（.ckpt，在 GPT_weights_v2Pro 文件夹里）"),
-                c.get("gpt", ""),
-                [("GPT 模型", "*.ckpt")], "gpt")
-            self._rows["sovits"] = _path_row(
-                _T("音色模型文件②（.pth，在 SoVITS_weights_v2Pro 文件夹里）"),
-                c.get("sovits", ""),
-                [("SoVITS 模型", "*.pth")], "sovits")
-            _voice0 = c.get("voice", "远坂凛")
-            _train_dir = GP + "/logs/" + _voice0 + "/5-wav32k"
-            _train_exists = os.path.isdir(_train_dir)
-            self._rows["ref"] = _path_row(
-                _T("一段参考语音（从你训练素材里挑一段清晰的 wav/mp3，用来定音色）"),
-                c.get("ref", ""),
-                [("音频", "*.wav *.mp3")], "ref",
-                initialdir=(_train_dir if _train_exists else None))
-            tk.Label(inner, text=_T("训练切片目录：GPT-SoVITS 根目录 \ logs \ 音色名 \ 5-wav32k \（你训练时起的那个音色名）"),
-                     bg="#FFFFFF", fg="#888888",
-                     font=("微软雅黑", 8)).pack(anchor="w", pady=(2, 0))
-            self._rows["pt"] = self._row(
-                inner, _T("这段参考语音里说的原话（一字不差填进去，音色才像）"),
-                c.get("pt", ""))
-
-            def on_sel(_e=None):
-                pr = PRESETS.get(voice.get(), {})
-                if pr.get("gpt"):
-                    self._rows["gpt"].set(pr["gpt"])
-                if pr.get("sovits"):
-                    self._rows["sovits"].set(pr["sovits"])
-
-            cb.bind("<<ComboboxSelected>>", on_sel)
-            if not self._rows["gpt"].get().strip():
-                on_sel()
-            self._note(inner, _T(
-                "怎么用（第一次照做，以后不用再看）：\n"
-                "① 先启动语音服务：打开你的 GPT-SoVITS 文件夹，在地址栏输入 cmd 回车，\n"
-                "   弹出黑窗口后输入 runtime\python.exe api.py -p 9880 回车，\n"
-                "   等出现 Uvicorn running on http://127.0.0.1:9880 就好了，黑窗口别关。\n"
-                "② 回到这里，在上面下拉选一个音色，会自动填好两个模型文件。\n"
-                "③ 点「浏览」选一段你这个音色的参考语音（wav/mp3）。\n"
-                "④ 把这段语音里说的原话一字不差填到最下面那栏。\n"
-                "⑤ 点保存并使用，就能用你自己训练的音色朗读了。\n"
-                "这是本地服务，不用联网也不用代理。外部音色不支持整本缓存。\n"
-                "注意：每次开机想用这个音色，都要先做第①步启动服务。"))
-            return
 
     # ---------- 探测音色 ----------
     def _probe(self, kind):
@@ -496,8 +412,11 @@ class _EngineDlg:
         eng_cfg = dict(s.get("tts_engine_cfg") or {})
 
         if kind == "builtin":
-            # 恢复内置音色：用之前备份的内置 voice
-            s["tts_engine_cfg"] = {"enabled": False, "kind": "builtin"}
+            # 恢复内置音色：保留各引擎已填配置，只切换 enabled/kind
+            cfg = dict(eng_cfg)
+            cfg["enabled"] = False
+            cfg["kind"] = "builtin"
+            s["tts_engine_cfg"] = cfg
             s["tts_voice"] = eng_cfg.get("builtin_voice", s.get("tts_voice", ""))
             self.app.storage.set_setting("tts_engine_cfg", s["tts_engine_cfg"])
             self.app.storage.set_setting("tts_voice", s["tts_voice"])
@@ -554,7 +473,7 @@ class _EngineDlg:
             label = "OpenAI·TTS"
         elif kind == "gptsovits":
             payload = {k: self._rows[k].get().strip()
-                       for k in ("base", "gpt", "sovits", "ref", "pt")}
+                       for k in ("base", "gpt", "sovits", "ref", "pt", "speed")}
             payload["pl"] = "zh"
             payload["tl"] = "zh"
             label = "GPT-SoVITS·" + self._rows["voice"].get()
@@ -572,9 +491,14 @@ class _EngineDlg:
         if _up is not None and _up.get() and _ap is not None and _ap.get().strip():
             payload["proxy"] = _ap.get().strip()
         voice_id = "ext:" + kind + ":" + urllib.parse.urlencode(payload)
-        s["tts_engine_cfg"] = {"enabled": True, "kind": kind,
-                               "builtin_voice": eng_cfg.get("builtin_voice", ""),
-                               "label": label, "voice_id": voice_id, kind: payload}
+        cfg = dict(eng_cfg)
+        cfg["enabled"] = True
+        cfg["kind"] = kind
+        cfg["builtin_voice"] = eng_cfg.get("builtin_voice", "")
+        cfg["label"] = label
+        cfg["voice_id"] = voice_id
+        cfg[kind] = payload
+        s["tts_engine_cfg"] = cfg
         s["tts_voice"] = voice_id
         self.app.storage.set_setting("tts_engine_cfg", s["tts_engine_cfg"])
         self.app.storage.set_setting("tts_voice", voice_id)

@@ -575,6 +575,7 @@ class NovelReaderBase:
         self.text_menu.add_command(label=_T("复制"), command=self._copy_selection)
         self.text_menu.add_command(label=_T("🔖 添加书签/划线"), command=self._add_bookmark_from_selection)
         self.text_menu.add_command(label=_T("从该段开始朗读"), command=self._read_from_paragraph)
+        self.text_menu.add_command(label=_T("重新分章（整本）"), command=self._reprocess_current_book)
         self.text_menu.add_separator()
         self.text_menu.add_command(label=_T("百度搜索"), command=lambda: self._search_selection("baidu"))
         self.text_menu.add_command(label=_T("谷歌搜索"), command=lambda: self._search_selection("google"))
@@ -668,13 +669,13 @@ class NovelReaderBase:
 
         # ---- 第 1 行：书名 ----
         row1 = tk.Frame(bar)
-        row1.pack(fill="x", pady=(3, 0))
+        row1.pack(fill="x", pady=(3, 1))
         self.title_label = tk.Label(row1, text=_T("未打开书籍"), font=("微软雅黑", 13, "bold"))
         self.title_label.pack(side="left", padx=(0, 4))
 
-        # ---- 第 1.5 行：章节导航（左） / 书架、目录、设置（右） ----
+        # ---- 第 2 行：章节导航 + 书架/目录/设置 ----
         row1b = tk.Frame(bar)
-        row1b.pack(fill="x", pady=(0, 1))
+        row1b.pack(fill="x", pady=1)
         ttk.Button(row1b, text=_T("◀ 上一章"), width=8,
                    command=lambda: self._goto_chapter(self.chapter_idx - 1)).pack(side="left", padx=1)
         self.chapter_cb = ttk.Combobox(row1b, state="readonly", width=24)
@@ -1010,3 +1011,4 @@ class NovelReaderApp(
 ):
     """多多朗读主应用（由基类 + 各功能 Mixin 组装，行为与原单文件一致）。"""
     pass
+

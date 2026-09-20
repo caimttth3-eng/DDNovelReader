@@ -163,9 +163,13 @@ def _detect_inner_heads(lines):
     for ln in lines[:-1]:
         offsets.append(offsets[-1] + len(ln) + 1)
     heads = []
+    pre_ok = set('。！？；…”’!?;】》〕）.!?;:：')
     for i, line in enumerate(lines):
         line = line.strip("\r")
         for m in _INNER_NUM_RE.finditer(line):
+            pre = line[:m.start()]
+            if pre and pre[-1] not in pre_ok:
+                continue
             after = line[m.end():]
             m2 = _INNER_NAME_RE.match(after)
             if not m2:
@@ -179,14 +183,17 @@ def _detect_inner_heads(lines):
     return heads
 
 def _inner_continuous(heads):
-    """内层标题编号是否从 1 连续（允许少量缺失）。"""
+    """内层标题是否可信（支持分卷编号重置）。"""
     nums = [n for _, _, n in heads if n is not None and n > 0]
     if len(nums) < 2:
         return False
     if len(nums) < 0.5 * len(heads):
         return False
+    # 分卷编号重置：同一编号出现多次但每次都是递增的小范围序列
+    # 只要章节数量足够多（>30），就认为是内层真章节
+    if len(nums) >= 30:
+        return True
     hi = max(nums)
-    # 缺失/重复率低即认为连续（最大编号 vs 实际数量接近，且去重后占比高）
     if len(set(nums)) / len(nums) < 0.85:
         return False
     return abs(hi - len(nums)) / max(hi, 1) <= 0.15
@@ -306,7 +313,27 @@ def split_chapters(text):
     if len(chapters) < 2:
         # 标题集中在文首（如目录），正文没被切到 → 不可靠
         return None
+    # 给没有换行的正文按句子加上换行（如空格分段的文本）
+    chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
     return chapters
+
+
+def _add_linebreaks(text):
+    """如果正文没有换行，按句末标点自动加上换行，让每句一行。"""
+    if not text or "\n" in text:
+        return text
+    # 按句末标点拆分，保留标点
+    parts = re.split(r'([。！？!?…；;])', text)
+    lines = []
+    cur = ""
+    for i in range(0, len(parts) - 1, 2):
+        cur += parts[i] + parts[i + 1]
+        if len(cur) >= 80:  # 每 80 字左右换一行
+            lines.append(cur.strip())
+            cur = ""
+    if cur:
+        lines.append(cur.strip())
+    return "\n".join(lines)
 
 
 def fallback_split(text, para_target=5000):

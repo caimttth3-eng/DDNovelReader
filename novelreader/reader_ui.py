@@ -177,6 +177,16 @@ class ReaderMixin:
         self._repin_reading()
         # 渲染本书书签高亮（划线标注）
         self._apply_bookmark_tags()
+    def _reprocess_current_book(self):
+        """右键菜单：按最新分章器重新解析整本（后台线程+进度窗）。"""
+        if not self.current_bid or not self.book:
+            return
+        info = self.storage.get_book(self.current_bid)
+        if not info or not info.get("path"):
+            messagebox.showinfo(_T("提示"), _T("找不到当前书籍路径"))
+            return
+        self._reprocess_book(info["path"], self.current_bid)
+
     def _render_empty(self):
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
@@ -523,18 +533,12 @@ class ReaderMixin:
     def _pin_highlight_top(self, start):
         """把高亮所在显示行钉到窗口第一行（兼容所有空行模式）。
 
-        模式1/2（每段独占一行）直接用 Tk 原生 yview(index) 整行滚动，天然精确；
-        模式3（清理所有行）全文只有一行，按行号滚动永远停在文首、高亮无法跟随，
-        改用「先 see 保证可见 → dlineinfo 测该行像素偏移 → yview fraction 换算
+        统一用「先 see 保证可见 → dlineinfo 测该行像素偏移 → yview fraction 换算
         滚动量」，把高亮所在显示行钉到窗口第一行。
         """
         try:
-            mode = int(self.settings.get("paragraph_mode", 1))
-            if mode != 3:
-                top = self.text.index(f"{start} linestart")
-                self.text.yview(top)
-                return
             self.text.see(start)
+            self.text.update_idletasks()
             dline = self.text.dlineinfo(start)
             if not dline:
                 return
@@ -543,8 +547,8 @@ class ReaderMixin:
                 pady = int(float(self.text.cget("pady")))
             except Exception:
                 pady = 0
-            delta = dline[1] - pady  # 该显示行距视口顶部还需上滚的像素
-            if delta <= 0:
+            delta = dline[1] - pady  # 该显示行距视口顶部还需滚动的像素
+            if abs(delta) < 2:
                 return
             first, last = self.text.yview()
             span = last - first
@@ -552,7 +556,8 @@ class ReaderMixin:
             if span <= 0 or viewport_px <= 0:
                 return
             total_px = viewport_px / span  # 全文像素总高度
-            self.text.yview_moveto(max(0.0, min(1.0, first + delta / total_px)))
+            new_first = max(0.0, min(1.0, first + delta / total_px))
+            self.text.yview_moveto(new_first)
         except Exception:
             try:
                 self.text.see(start)

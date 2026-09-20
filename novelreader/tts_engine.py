@@ -15,6 +15,7 @@ v3 新增双后端：
 """
 import os
 import json
+import hashlib
 
 import asyncio
 import queue
@@ -303,7 +304,7 @@ def _synth_gptsovits(text, qs):
         "refer_wav_path": qs.get("ref", ""),
         "prompt_text": qs.get("pt", ""),
         "prompt_language": qs.get("pl", "zh"),
-        "speed": "1.0",
+        "speed": qs.get("speed", "1.0"),
     }
     req = urllib.request.Request(base + "/?" + urllib.parse.urlencode(p))
     return _http_read(req, timeout=180, proxy=proxy), "wav"
@@ -402,14 +403,17 @@ class WholeBookCacher:
 
     def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None,
                  bump_cb=None, size_cb=None, flush_cb=None, preset_tasks=None,
-                 workers=None):
+                 workers=None, is_external=False):
         if workers:
             self.WORKERS = workers
         self._book = book
         self._book_id = str(book_id or "book")
+        self._is_external = is_external
         # 每本书一个顶层目录：<cache_root>/<book_id>/<语音>/<语速>/
+        # external voice_id 很长（ext:gptsovits:...），用 hash 缩短
+        _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_external else _sanitize_name(voice)
         self._dir = os.path.join(
-            cache_root, self._book_id, _sanitize_name(voice), str(int(rate))
+            cache_root, self._book_id, _vdir, str(int(rate))
         )
         self._voice = voice
         self._rate = int(rate)
@@ -670,7 +674,10 @@ class WholeBookCacher:
                 self._maybe_save()
                 continue
             try:
-                audio = synth_audio(text, self._voice, self._rate)
+                if self._is_external:
+                    audio, _ext = synth_external(text, self._voice, self._rate)
+                else:
+                    audio = synth_audio(text, self._voice, self._rate)
                 if not audio:
                     continue  # 合成失败/空：不标记完成，留待续传重试
                 self._write(ci, off, audio)
@@ -855,10 +862,12 @@ class SpeechController:
                 # 系统 SAPI 语音
                 self._backend = "sapi"
                 self._pending_voice = voice_id
+                self._external_voice = None
             else:
                 # Edge 神经语音（zh-CN-XiaoxiaoNeural 等）
                 self._backend = "edge"
                 self._edge_voice = voice_id
+                self._external_voice = None
 
     def set_rate(self, rate):
         with self._cv:
@@ -924,12 +933,14 @@ class SpeechController:
         if not self._tts_cache_dir:
             return None
         with self._cv:
-            if self._backend != "edge":
+            is_ext = (self._backend == "external")
+            if not is_ext and self._backend != "edge":
                 return None
-            voice = self._edge_voice
+            voice = self._external_voice if is_ext else self._edge_voice
             rate = int(self._rate)
         bid = self._book_id or "book"
-        d = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
+        _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_ext else _sanitize_name(voice)
+        d = os.path.join(self._tts_cache_dir, bid, _vdir, str(rate))
         p = os.path.join(d, f"{int(ci):04d}_{int(off):08d}.mp3")
         try:
             if os.path.exists(p) and os.path.getsize(p) > 0:
@@ -946,14 +957,13 @@ class SpeechController:
         也可以同时缓存第二本，互不干扰。resume=True 从持久化进度继续。
         返回状态 dict。
         """
-        if self._backend != "edge":
-            return {"state": "unsupported"}
         if not self._tts_cache_dir or not book or not book.chapters:
             return {"state": "unavailable"}
         bid = str(book_id or "book")
         self._book_id = bid  # 同步当前书 id，保证后续查询/控制落在本书
         with self._cv:
-            voice = self._edge_voice
+            is_external = (self._backend == "external")
+            voice = self._external_voice if is_external else self._edge_voice
             rate = int(self._rate)
         with self._book_cachers_lock:
             cacher = self._book_cachers.get(bid)
@@ -976,6 +986,7 @@ class SpeechController:
                 bump_cb=self._tts_size_bump, size_cb=self.tts_cache_size,
                 flush_cb=self._tts_size_persist,
                 workers=self._cache_workers,
+                is_external=is_external,
             )
             self._book_cachers[bid] = cacher
         cacher.start(resume=resume)
@@ -1634,7 +1645,7 @@ class SpeechController:
 
     def _speak_edge(self, text, gen, ci, off, content, next_off):
         """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。"""
-        cached = self._cached_audio(ci, off) if self._backend == "edge" else None
+        cached = self._cached_audio(ci, off) if self._backend in ("edge", "external") else None
         if cached:
             return self._speak_edge_play(cached, gen)
         if self._edge_prefetch is None:
