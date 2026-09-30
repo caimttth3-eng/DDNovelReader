@@ -143,16 +143,32 @@ class TtsMixin:
             self.tts_cache_btn.configure(text=_T("整本缓存"))
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))
     def _change_rate(self, delta):
-        rate = max(80, min(400, int(self.settings.get("tts_rate", 200)) + delta))
-        self.settings["tts_rate"] = rate
-        self.rate_label.configure(text=str(rate))
-        self.tts.set_rate(rate)
-        self.storage.set_setting("tts_rate", rate)
+        old_rate = int(self.settings.get("tts_rate", 200))
+        new_rate = max(50, min(400, old_rate + delta))
+        if new_rate == old_rate:
+            return
+        if self._has_any_book_cache():
+            from tkinter import messagebox
+            if not messagebox.askyesno("提示", "更改语速后，已有的整本缓存将不命中，需要重新缓存。是否继续？"):
+                return
+        self.settings["tts_rate"] = new_rate
+        self.rate_label.configure(text=str(new_rate))
+        self.tts.set_rate(new_rate)
+        self.storage.set_setting("tts_rate", new_rate)
     def _on_voice_change(self, event):
         idx = self.voice_cb.current()
         if idx < 0 or not getattr(self, "_voice_ids", None):
             return
         voice_id = self._voice_ids[idx]
+        old_voice = self.settings.get("tts_voice", "")
+        if voice_id == old_voice:
+            return
+        if self._has_any_book_cache():
+            from tkinter import messagebox
+            if not messagebox.askyesno("提示", "更改语音后，已有的整本缓存将不命中，需要重新缓存。是否继续？"):
+                old_idx = self._voice_ids.index(old_voice) if old_voice in self._voice_ids else 0
+                self.voice_cb.current(old_idx)
+                return
         self.settings["tts_voice"] = voice_id
         self.tts.set_voice(voice_id)
         self.storage.set_setting("tts_voice", voice_id)
@@ -168,3 +184,20 @@ class TtsMixin:
     def _shortcut_tts_toggle(self, event=None):
         self._tts_toggle()
         return "break"
+
+    def _has_any_book_cache(self):
+        """检查是否有任何一本书存在整本缓存。"""
+        try:
+            cache_dir = self.storage.get_setting("tts_cache_dir", "")
+            if not cache_dir or not os.path.isdir(cache_dir):
+                return False
+            for entry in os.listdir(cache_dir):
+                full = os.path.join(cache_dir, entry)
+                if os.path.isdir(full):
+                    for root, dirs, files in os.walk(full):
+                        for f in files:
+                            if f.endswith(".mp3"):
+                                return True
+        except Exception:
+            pass
+        return False

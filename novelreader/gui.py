@@ -744,16 +744,22 @@ class NovelReaderBase:
 
         ttk.Separator(row3, orient="vertical").pack(side="left", fill="y", padx=8)
         _lbl(row3, _T("语速"))
-        ttk.Button(row3, text="－", width=2, command=lambda: self._change_rate(-10)).pack(side="left", padx=1)
-        self.rate_label = tk.Label(row3, text="200", width=3, font=("微软雅黑", 10))
-        self.rate_label.pack(side="left")
-        ttk.Button(row3, text="＋", width=2, command=lambda: self._change_rate(10)).pack(side="left", padx=(1, 8))
+        self.rate_var = tk.DoubleVar(value=200)
+        self.rate_scale = ttk.Scale(row3, from_=50, to=400, variable=self.rate_var,
+                                     command=self._on_rate_change, length=110)
+        self.rate_scale.pack(side="left", padx=(2, 4))
+        self.rate_scale.bind("<ButtonRelease-1>", self._on_rate_release)
+        self.rate_label = tk.Label(row3, text="200", width=4, font=("微软雅黑", 10))
+        self.rate_label.pack(side="left", padx=(0, 8))
 
         _lbl(row3, _T("停顿"))
-        ttk.Button(row3, text="－", width=2, command=lambda: self._change_sentence_gap(-0.05)).pack(side="left", padx=1)
+        self.gap_var = tk.DoubleVar(value=0.10)
+        self.gap_scale = ttk.Scale(row3, from_=0, to=1.0, variable=self.gap_var,
+                                    command=self._on_gap_change, length=80)
+        self.gap_scale.pack(side="left", padx=(2, 4))
+        self.gap_scale.bind("<ButtonRelease-1>", self._on_gap_release)
         self.gap_label = tk.Label(row3, text="0.10", width=4, font=("微软雅黑", 10))
-        self.gap_label.pack(side="left")
-        ttk.Button(row3, text="＋", width=2, command=lambda: self._change_sentence_gap(0.05)).pack(side="left", padx=(1, 8))
+        self.gap_label.pack(side="left", padx=(0, 8))
 
         # ---- 第 4 行：音量/语音/缓存/定时 ----
         row4 = tk.Frame(bar)
@@ -795,9 +801,11 @@ class NovelReaderBase:
         if theme not in THEMES:
             theme = "护眼"
         self.theme_cb.set(_T(theme))
+        self.rate_var.set(int(self.settings.get("tts_rate", 200)))
         self.rate_label.configure(text=str(self.settings.get("tts_rate", 200)))
         self.tts.set_rate(self.settings.get("tts_rate", 200))
         self.tts.set_sentence_gap(self.settings.get("tts_sentence_gap", 0.10))
+        self.gap_var.set(float(self.settings.get("tts_sentence_gap", 0.10)))
         self.gap_label.configure(text=f"{float(self.settings.get('tts_sentence_gap', 0.10)):.2f}")
         _vol = int(self.settings.get("volume", 100))
         self.volume_var.set(_vol)

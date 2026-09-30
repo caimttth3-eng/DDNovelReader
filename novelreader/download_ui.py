@@ -122,6 +122,16 @@ class DownloadMixin:
             fg="#b00020", font=("微软雅黑", 8),
         ).pack(side="left", padx=8)
 
+        # 显示当前缓存参数
+        voice_name = self.settings.get("tts_voice", "")
+        rate_val = self.settings.get("tts_rate", 200)
+        gap_val = self.settings.get("tts_sentence_gap", 0.5)
+        tk.Label(
+            win,
+            text=_T("当前缓存参数：语音 {v} | 语速 {r} | 停顿 {g}s  ⚠️ 缓存开始后请勿更改，否则新缓存将不命中").format(v=voice_name, r=rate_val, g=gap_val),
+            fg="#8a5a00", font=("微软雅黑", 9), anchor="w", wraplength=840,
+        ).pack(fill="x", padx=12, pady=(0, 2))
+
         self._cache_mgr_status = tk.Label(win, text="", anchor="w", fg="#666666", font=("微软雅黑", 9))
         self._cache_mgr_status.pack(fill="x", padx=12, pady=(0, 8))
 

@@ -316,7 +316,7 @@ class _EngineDlg:
                 c.get("sovits", ""),
                 [("SoVITS 模型", "*.pth")], "sovits")
             self._rows["ref"] = _path_row(
-                _T("一段参考语音（在 GPT-SoVITS\logs\你起的音色名\5-wav32k 里挑一段）"),
+                _T("一段参考语音（在 GPT-SoVITS/logs/你起的音色名/5-wav32k 里挑一段）"),
                 c.get("ref", ""),
                 [("音频", "*.wav *.mp3")], "ref")
             self._rows["pt"] = self._row(
@@ -327,7 +327,7 @@ class _EngineDlg:
                 c.get("speed", "1.0"))
 
             def _copy_cmd():
-                cmd = "runtime\python.exe api.py -p 9880"
+                cmd = "runtime/python.exe api.py -p 9880"
                 self.top.clipboard_clear()
                 self.top.clipboard_append(cmd)
                 from tkinter import messagebox
@@ -336,17 +336,17 @@ class _EngineDlg:
             btn_fr = tk.Frame(inner, bg="#FFFFFF")
             btn_fr.pack(anchor="w", pady=(8, 0))
             ttk.Button(btn_fr, text=_T("复制启动命令"), command=_copy_cmd).pack(side="left")
-            tk.Label(btn_fr, text="  runtime\python.exe api.py -p 9880",
+            tk.Label(btn_fr, text="  runtime/python.exe api.py -p 9880",
                      bg="#FFFFFF", fg="#888888", font=("Consolas", 9)).pack(side="left")
 
             self._note(inner, _T(
                 "怎么用（第一次照做，以后不用再看）：\n"
                 "① 先启动语音服务：打开你的 GPT-SoVITS 文件夹，在地址栏输入 cmd 回车，\n"
-                "   弹出黑窗口后输入 runtime\python.exe api.py -p 9880 回车，\n"
+                "   弹出黑窗口后输入 runtime/python.exe api.py -p 9880 回车，\n"
                 "   等出现 Uvicorn running on http://127.0.0.1:9880 就好了，黑窗口别关。\n"
                 "② 填音色名（你训练时起的名字）。\n"
                 "③ 用浏览按钮选两个模型文件：.ckpt 在 GPT_weights_v2Pro 文件夹，.pth 在 SoVITS_weights_v2Pro。\n"
-                "④ 用浏览按钮选一段参考语音：在 logs\你起的音色名\5-wav32k 里挑一段清晰的。\n"
+                "④ 用浏览按钮选一段参考语音：在 logs/你起的音色名/5-wav32k 里挑一段清晰的。\n"
                 "⑤ 把这段语音里说的原话一字不差填到最下面那栏。\n"
                 "⑥ 点保存并使用，就能用你自己训练的音色朗读了。\n"
                 "这是本地服务，不用联网也不用代理。外部音色也支持整本缓存。\n"

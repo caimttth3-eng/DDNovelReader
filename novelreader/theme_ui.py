@@ -76,6 +76,34 @@ class ThemeMixin:
         self.tts.set_volume(v)
         self.settings["volume"] = v
         self.storage.set_setting("volume", v)
+    def _on_rate_change(self, val):
+        v = int(float(val))
+        self.rate_label.configure(text=str(v))
+        self.tts.set_rate(v)
+        self.settings["tts_rate"] = v
+        self.storage.set_setting("tts_rate", v)
+    def _on_rate_release(self, event):
+        """松开语速滑块时检查缓存不匹配。"""
+        try:
+            if self._has_any_book_cache():
+                from tkinter import messagebox
+                messagebox.showinfo("提示", "语速已更改，已有的整本缓存将不命中，需要重新缓存。")
+        except Exception:
+            pass
+    def _on_gap_change(self, val):
+        v = round(float(val), 2)
+        self.gap_label.configure(text=f"{v:.2f}")
+        self.tts.set_sentence_gap(v)
+        self.settings["tts_sentence_gap"] = v
+        self.storage.set_setting("tts_sentence_gap", v)
+    def _on_gap_release(self, event):
+        """松开停顿滑块时检查缓存不匹配。"""
+        try:
+            if self._has_any_book_cache():
+                from tkinter import messagebox
+                messagebox.showinfo("提示", "停顿已更改，已有的整本缓存将不命中，需要重新缓存。")
+        except Exception:
+            pass
     def _on_theme_change(self, event):
         _rev = {_T(k): k for k in THEMES}
         theme = _rev.get(self.theme_cb.get(), self.theme_cb.get())

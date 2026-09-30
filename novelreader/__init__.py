@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
-"""小说阅读器（Windows / TTS 语音朗读版）。"""
+"小说阅读器（Windows / TTS 语音朗读版）。"
 
-__version__ = "2.0V3"
+__version__ = "2.0V5"
 

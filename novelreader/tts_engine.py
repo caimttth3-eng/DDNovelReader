@@ -146,7 +146,7 @@ def synth_audio(text, voice, rate=200):
     """用 Edge 神经语音把一句文本合成为 MP3 字节（独立事件循环，线程安全）。"""
     if edge_tts is None:
         raise RuntimeError("edge-tts 未安装")
-    rate_adj = int((max(80, min(400, int(rate))) - 200) / 2)
+    rate_adj = int((max(50, min(400, int(rate))) - 200) / 2)
     buf = bytearray()
 
     async def _gen():
@@ -1788,15 +1788,17 @@ def _set_process_volume(volume_0_100):
 
 
 def _mci_play():
-    _mci_send(f"play {_MCI_ALIAS}")
-
-
+    err, _ = _mci_send(f"play {_MCI_ALIAS}")
+    if err != 0:
+        raise RuntimeError(f"MCI play 失败 code={err}")
 def _mci_pause():
     _mci_send(f"pause {_MCI_ALIAS}")
 
 
 def _mci_resume():
-    _mci_send(f"play {_MCI_ALIAS}")
+    err, _ = _mci_send(f"play {_MCI_ALIAS}")
+    if err != 0:
+        raise RuntimeError(f"MCI resume 失败 code={err}")
 
 
 def _mci_stop():
