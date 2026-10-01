@@ -147,6 +147,10 @@ class ShortcutsMixin:
             pass
         self._overlay.grid(row=0, column=0, columnspan=2, sticky="ew")
         self._tick_overlay()
+        try:
+            self.text_menu.entryconfigure(self._fullscreen_menu_index, label=_T("退出全屏"))
+        except Exception:
+            pass
     def _exit_fullscreen(self, event=None):
         if not self._fullscreen:
             return
@@ -164,6 +168,10 @@ class ShortcutsMixin:
                 if str(self.chapter_panel) not in pane_paths:
                     self._inner_paned.add(self.chapter_panel, weight=0)
                     self._chapter_panel_visible = True
+        except Exception:
+            pass
+        try:
+            self.text_menu.entryconfigure(self._fullscreen_menu_index, label=_T("全屏阅读"))
         except Exception:
             pass
     def _tick_overlay(self):

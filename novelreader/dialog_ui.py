@@ -488,16 +488,21 @@ class DialogMixin:
                 w.bind("<Button-1>", _sw)
     def _open_bili(self):
         """打开作者 B 站空间。"""
-        import webbrowser
-        webbrowser.open("https://space.bilibili.com/42444")
+        import os
+        try:
+            os.startfile("https://space.bilibili.com/42444")
+        except Exception:
+            import webbrowser
+            webbrowser.open("https://space.bilibili.com/42444")
 
 
     def _open_github(self):
         try:
+            import os
+            os.startfile("https://github.com/caimttth3-eng/DDNovelReader")
+        except Exception:
             import webbrowser
             webbrowser.open("https://github.com/caimttth3-eng/DDNovelReader")
-        except Exception:
-            pass
 
     def _copy_douyin(self):
         """复制作者抖音号到剪贴板。"""

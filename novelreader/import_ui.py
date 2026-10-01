@@ -89,9 +89,19 @@ class ImportMixin:
             "baidu": f"https://www.baidu.com/s?wd={q}",
             "google": f"https://www.google.com/search?q={q}",
             "bing": f"https://www.bing.com/search?q={q}",
-            "translate": f"https://translate.google.com/?sl=auto&tl=zh-CN&text={q}",
+            "baidu_translate": f"https://fanyi.baidu.com/#auto/zh/{q}",
+            "google_translate": f"https://translate.google.com/?sl=auto&tl=zh-CN&text={q}",
+            "sogou_translate": f"https://fanyi.sogou.com/text?keyword={q}",
         }
-        webbrowser.open(urls[engine])
+        url = urls[engine]
+        try:
+            import os
+            os.startfile(url)
+        except Exception:
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                messagebox.showerror(_T("错误"), f"{_T('打开浏览器失败')}: {e}")
     def _open_selected(self):
         bid = self._selected_bid()
         if bid:

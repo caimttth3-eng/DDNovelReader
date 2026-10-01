@@ -572,16 +572,19 @@ class NovelReaderBase:
 
         # 阅读区右键菜单
         self.text_menu = tk.Menu(self.root, tearoff=0)
+        self.text_menu.add_command(label=_T("从该段开始朗读"), command=self._read_from_paragraph)
         self.text_menu.add_command(label=_T("复制"), command=self._copy_selection)
         self.text_menu.add_command(label=_T("🔖 添加书签/划线"), command=self._add_bookmark_from_selection)
-        self.text_menu.add_command(label=_T("从该段开始朗读"), command=self._read_from_paragraph)
         self.text_menu.add_command(label=_T("重新分章（整本）"), command=self._reprocess_current_book)
         self.text_menu.add_separator()
         self.text_menu.add_command(label=_T("百度搜索"), command=lambda: self._search_selection("baidu"))
         self.text_menu.add_command(label=_T("谷歌搜索"), command=lambda: self._search_selection("google"))
         self.text_menu.add_command(label=_T("必应搜索"), command=lambda: self._search_selection("bing"))
-        self.text_menu.add_separator()
-        self.text_menu.add_command(label=_T("翻译"), command=lambda: self._search_selection("translate"))
+        self.text_menu.add_command(label=_T("百度翻译"), command=lambda: self._search_selection("baidu_translate"))
+        self.text_menu.add_command(label=_T("谷歌翻译"), command=lambda: self._search_selection("google_translate"))
+        self.text_menu.add_command(label=_T("搜狗翻译"), command=lambda: self._search_selection("sogou_translate"))
+        self.text_menu.add_command(label=_T("全屏阅读"), command=self._toggle_fullscreen)
+        self._fullscreen_menu_index = self.text_menu.index("end")
 
         # 目录（内层 PanedWindow 的第二个窗格，可开关）
         self.chapter_panel = tk.Frame(self._inner_paned, width=220)
