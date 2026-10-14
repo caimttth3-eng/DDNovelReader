@@ -46,16 +46,16 @@
 
 在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载对应平台的最新版，绿色免安装：
 
-- **Windows**：`DDNovelReader-vX.XX.exe`，双击即可运行
-- **macOS**：`DDNovelReader-macOS-vX.XX.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
+- **Windows**：`DDNovelReader_v2.1_Windows.exe`，双击即可运行
+- **macOS**：`DDNovelReader-macOS_v2.1.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
   1. **DMG**：双击挂载 → 把 `DDNovelReader.app` 拖入「应用程序」文件夹
   2. **ZIP**：双击解压得到 `DDNovelReader.app`，拖入「应用程序」文件夹
   3. 首次打开若提示「无法验证开发者」：右键 app → 打开 → 再次点击「打开」；或在 系统设置 → 隐私与安全性 中点「仍要打开」
   4. 若提示「已损坏，无法打开」：打开终端执行 `sudo xattr -dr com.apple.quarantine /Applications/DDNovelReader.app` 后重试
-- **Linux**：`DDNovelReader-linux-vX.XX`，安装步骤：
-  1. 下载后在终端进入文件所在目录
-  2. 加执行权限：`chmod +x DDNovelReader-linux-vX.XX`
-  3. 运行：`./DDNovelReader-linux-vX.XX`
+- **Linux**：`DDNovelReader_v2.1_Linux.zip`，安装步骤：
+  1. 解压得到可执行文件后，在终端进入文件所在目录
+  2. 加执行权限：`chmod +x DDNovelReader`
+  3. 运行：`./DDNovelReader`
   4. 本地语音朗读需安装 espeak：Ubuntu/Debian 执行 `sudo apt install espeak`，Fedora 执行 `sudo dnf install espeak-ng`（Edge 在线语音无需安装）
 
 ## 使用步骤
@@ -188,7 +188,7 @@ DDNovelReader/
 ## 技术栈
 
 - 界面：Python 标准库 tkinter（Tcl/Tk 8.6）+ ttk 主题
-- 朗读：pyttsx3（Windows SAPI5）+ edge-tts（微软 Edge 神经语音）
+- 朗读：pyttsx3（Windows SAPI5）+ edge-tts 7.3.1（微软 Edge 神经语音）
 - 音频播放：Windows MCI（winmm.dll，零第三方依赖）
 - 音量控制：pycaw（Windows Core Audio，进程级音量）
 - 解析：ebooklib（epub）、mobi（mobi/azw3）、pypdfium2（pdf，PDFium 引擎）、python-docx（docx）、zipfile（zip）、chmlib 内置库（chm，Zig 交叉编译 Windows/macOS/Linux 三平台）
