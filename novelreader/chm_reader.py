@@ -21,7 +21,8 @@ def _library_candidates():
     if sys.platform.startswith("win"):
         names = ["chmlib.dll"]
     elif sys.platform == "darwin":
-        names = ["libchmlib.dylib"]
+        # 打包时以 .bin 名发布（PyInstaller 不把 .bin 当二进制处理，规避 mac 签名/校验失败）；开发时允许 dylib
+        names = ["libchmlib.bin", "libchmlib.dylib"]
     else:
         names = ["libchmlib.so"]
     bases = []

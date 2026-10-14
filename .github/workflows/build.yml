@@ -54,10 +54,8 @@ jobs:
         id: arch
         run: |
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
-      - name: Sign chmlib
-        run: codesign -s - "chmlib_libs/macos-${{ steps.arch.outputs.arch }}/libchmlib.dylib"
       - name: Build
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-data "chmlib_libs/macos-${{ steps.arch.outputs.arch }}/libchmlib.dylib:." novelreader/main.py
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-data "chmlib_libs/macos-${{ steps.arch.outputs.arch }}/libchmlib.bin:." novelreader/main.py
       - name: Package
         run: |
           ditto -c -k --sequesterRsrc --keepParent dist/DDNovelReader.app DDNovelReader-macOS.zip
