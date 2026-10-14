@@ -1505,7 +1505,10 @@ class SpeechController:
 
     # ---------- 工作线程 ----------
     def _loop(self):
-        self._ensure_engine()
+        try:
+            self._ensure_engine()
+        except Exception:
+            pass
         if self._ready is not None:
             self._ready.set()
         try:
@@ -1523,10 +1526,16 @@ class SpeechController:
             self._post({"type": "error", "message": f"朗读出错：{e}"})
 
     def _ensure_engine(self):
-        # 仅 SAPI 后端需要 pyttsx3 引擎；Edge 后端按需初始化 pygame
+        # 仅 SAPI 后端需要 pyttsx3；Edge 后端按需初始化 pygame。
+        # pyttsx3.init() 必须在主线程/COM 就绪环境执行，工作线程里会抛异常导致朗读线程崩溃。
+        if self._backend != "sapi":
+            return
         if self._engine is None and pyttsx3 is not None:
-            self._engine = pyttsx3.init()
-            self._engine.startLoop(useDriverLoop=False)
+            try:
+                self._engine = pyttsx3.init()
+                self._engine.startLoop(useDriverLoop=False)
+            except Exception:
+                self._engine = None
 
     def _sync_props(self):
         with self._cv:

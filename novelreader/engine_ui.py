@@ -327,7 +327,7 @@ class _EngineDlg:
                 c.get("speed", "1.0"))
 
             def _copy_cmd():
-                cmd = "runtime/python.exe api.py -p 9880"
+                cmd = "runtime\\python.exe api.py -p 9880"
                 self.top.clipboard_clear()
                 self.top.clipboard_append(cmd)
                 from tkinter import messagebox
@@ -336,13 +336,13 @@ class _EngineDlg:
             btn_fr = tk.Frame(inner, bg="#FFFFFF")
             btn_fr.pack(anchor="w", pady=(8, 0))
             ttk.Button(btn_fr, text=_T("复制启动命令"), command=_copy_cmd).pack(side="left")
-            tk.Label(btn_fr, text="  runtime/python.exe api.py -p 9880",
+            tk.Label(btn_fr, text="  runtime\\python.exe api.py -p 9880",
                      bg="#FFFFFF", fg="#888888", font=("Consolas", 9)).pack(side="left")
 
             self._note(inner, _T(
                 "怎么用（第一次照做，以后不用再看）：\n"
                 "① 先启动语音服务：打开你的 GPT-SoVITS 文件夹，在地址栏输入 cmd 回车，\n"
-                "   弹出黑窗口后输入 runtime/python.exe api.py -p 9880 回车，\n"
+                "   弹出黑窗口后输入 runtime\\python.exe api.py -p 9880 回车，\n"
                 "   等出现 Uvicorn running on http://127.0.0.1:9880 就好了，黑窗口别关。\n"
                 "② 填音色名（你训练时起的名字）。\n"
                 "③ 用浏览按钮选两个模型文件：.ckpt 在 GPT_weights_v2Pro 文件夹，.pth 在 SoVITS_weights_v2Pro。\n"

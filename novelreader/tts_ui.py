@@ -37,6 +37,9 @@ from .constants import (
 
 class TtsMixin:
     """TTS 控制：开始 / 暂停 / 继续 / 停止 / 语速 / 音量 / 语音切换"""
+    def _start_tts(self, book, ci, off):
+        """统一朗读入口（多人有声模块已下线，保留此入口供 tts_ui / reader_ui 调用）。"""
+        self.tts.start(book, ci, off)
     def _tts_toggle(self):
         """开始 / 暂停 / 继续 切换。"""
         if not self.book:
