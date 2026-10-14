@@ -54,8 +54,11 @@ jobs:
         id: arch
         run: |
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Build chmlib (native clang)
+        run: |
+          clang -dynamiclib -O2 -o libchmlib.dylib chmlib_src/chm_lib.c chmlib_src/lzx.c -I chmlib_src
       - name: Build
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-data "chmlib_libs/macos-${{ steps.arch.outputs.arch }}/libchmlib.bin:." novelreader/main.py
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-binary "libchmlib.dylib:." novelreader/main.py
       - name: Package
         run: |
           ditto -c -k --sequesterRsrc --keepParent dist/DDNovelReader.app DDNovelReader-macOS.zip
