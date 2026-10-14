@@ -4,8 +4,10 @@
 内置 Edge / 系统语音为默认；额外提供「外部 TTS 服务」接入：
 VOICEVOX / vits-simple-api（含 GPT-SoVITS）/ Google TTS / 火山引擎 /
 OpenAI 兼容 / 自定义 HTTP。软件本身不安装这些引擎，只探测用户已在
-本地运行的服务并调用；外部引擎仅支持实时朗读，不支持整本语音缓存。
+本地运行的服务并调用；外部引擎支持实时朗读与整本语音缓存（需服务运行）。
 """
+import os
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -128,7 +130,7 @@ class _EngineDlg:
         bar = tk.Frame(self.top, bg=self._bg)
         bar.pack(fill="x", padx=16, pady=(0, 12))
         tk.Label(bar, fg="#b26a00", bg=self._bg, font=("微软雅黑", 9),
-                 text=_T("⚠ 外部引擎仅支持实时朗读，不支持整本语音缓存")).pack(side="left")
+                 text=_T("外部引擎也支持整本语音缓存下载（首次缓存需联网/启动对应服务）")).pack(side="left")
         ttk.Button(bar, text=_T("取消"), command=self.top.destroy).pack(side="right", padx=(8, 0))
         ttk.Button(bar, text=_T("保存并使用"), command=self._on_save).pack(side="right")
 
@@ -233,8 +235,8 @@ class _EngineDlg:
             self._rows["lang_var"] = tk.StringVar(value=c.get("lang", "zh-CN"))
             tk.Label(inner, text=_T("语言"), bg="#FFFFFF", font=("微软雅黑", 9)).pack(anchor="w", pady=(8, 2))
             self.lang_cb = ttk.Combobox(inner, state="readonly", width=30)
-            self.lang_cb["values"] = [f"{n} ({k})" for k, n in _GOOGLE_LANGS]
-            cur = next((f"{n} ({k})" for k, n in _GOOGLE_LANGS if k == c.get("lang", "zh-CN")), None)
+            self.lang_cb["values"] = [f"{_T(n)} ({k})" for k, n in _GOOGLE_LANGS]
+            cur = next((f"{_T(n)} ({k})" for k, n in _GOOGLE_LANGS if k == c.get("lang", "zh-CN")), None)
             if cur:
                 self.lang_cb.set(cur)
             self.lang_cb.pack(anchor="w")
@@ -277,6 +279,125 @@ class _EngineDlg:
                 inner, _T("服务地址（一般不用改）"), c.get("base", "http://127.0.0.1:9880"))
             # 音色名不手填，选模型文件时自动从文件名提取
             self._rows["voice"] = tk.StringVar(value=c.get("voice", ""))
+
+            # ---- GPT-SoVITS 根目录 + 一键启动 / 停止 ----
+            # 只读显示 + 点「选择目录…」选（不允许手输）；选一次立即保存，下次打开自动回填
+            self._rows["root"] = tk.StringVar(
+                value=self.app.settings.get("gptsovits_root", ""))
+
+            def _pick_root():
+                from tkinter import filedialog
+                d = filedialog.askdirectory(
+                    title=_T("选择 GPT-SoVITS 根目录"),
+                    initialdir=self._rows["root"].get() or None)
+                if d:
+                    self._rows["root"].set(d)
+                    # 立即持久化（写文件 + 内存同步），本会话内再次打开也自动回填
+                    self.app.storage.set_setting("gptsovits_root", d)
+                    self.app.settings["gptsovits_root"] = d
+
+            tk.Label(inner, text=_T("GPT-SoVITS 根目录"), bg="#FFFFFF",
+                     font=("微软雅黑", 9)).pack(anchor="w", pady=(6, 2))
+            root_fr = tk.Frame(inner, bg="#FFFFFF")
+            root_fr.pack(fill="x", anchor="w")
+            tk.Entry(root_fr, textvariable=self._rows["root"], width=46,
+                     font=("微软雅黑", 10), state="readonly").pack(side="left", padx=(0, 6))
+            tk.Button(root_fr, text=_T("选择目录…"), command=_pick_root,
+                      font=("微软雅黑", 9)).pack(side="left")
+
+            self._svc_proc = None
+            _svc_status = tk.StringVar(value=_T("未启动"))
+
+            def _find_python(root_dir):
+                # 三平台同一个 api.py：Windows 集成包用 runtime\python.exe；
+                # Mac/Linux 集成包是 runtime/bin/python3（或 runtime/python）；
+                # 源码部署没有 runtime，回退 PATH 里的系统 python3 / python。
+                if os.name == "nt":
+                    cands = [os.path.join(root_dir, "runtime", "python.exe")]
+                else:
+                    cands = [
+                        os.path.join(root_dir, "runtime", "bin", "python3"),
+                        os.path.join(root_dir, "runtime", "bin", "python"),
+                        os.path.join(root_dir, "runtime", "python"),
+                    ]
+                for p in cands:
+                    if os.path.isfile(p):
+                        return p
+                import shutil
+                for exe in ("python3", "python"):
+                    p = shutil.which(exe)
+                    if p:
+                        return p
+                return None
+
+            def _port_open(port=9880, timeout=0.4):
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(timeout)
+                try:
+                    return s.connect_ex(("127.0.0.1", port)) == 0
+                finally:
+                    s.close()
+
+            def _start_svc():
+                root = self._rows["root"].get().strip()
+                if not root or not os.path.isdir(root):
+                    messagebox.showinfo(_T("提示"), _T("先点「选择目录…」选你的 GPT-SoVITS 文件夹"))
+                    return
+                if _port_open():
+                    _svc_status.set(_T("服务已在运行（端口 9880）"))
+                    return
+                py = _find_python(root)
+                if not py:
+                    messagebox.showinfo(
+                        _T("提示"),
+                        _T("选择的 GPT-SoVITS 文件夹里没有可用的 Python；\n源码部署的用户请先手动启动服务（python3 api.py -p 9880），再点保存。"))
+                    return
+                try:
+                    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+                    self._svc_proc = subprocess.Popen(
+                        [py, "api.py", "-p", "9880"], cwd=root,
+                        creationflags=flags)
+                    _svc_status.set(_T("正在启动…"))
+                    self.top.after(500, lambda: _poll_svc(0))
+                except Exception as e:
+                    messagebox.showerror(_T("启动失败"), str(e))
+
+            def _stop_svc():
+                p = self._svc_proc
+                if p is None or p.poll() is not None:
+                    _svc_status.set(_T("未检测到由本软件启动的服务"))
+                    return
+                try:
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                                       capture_output=True,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        p.terminate()
+                    _svc_status.set(_T("已停止"))
+                except Exception as e:
+                    messagebox.showerror(_T("停止失败"), str(e))
+
+            def _poll_svc(rounds):
+                if _port_open():
+                    _svc_status.set(_T("服务已就绪（端口 9880），可以用了"))
+                    return
+                p = self._svc_proc
+                if p is not None and p.poll() is not None:
+                    _svc_status.set(_T("启动失败：进程已退出（请看 GPT-SoVITS 日志）"))
+                    return
+                if rounds < 20:
+                    self.top.after(500, lambda: _poll_svc(rounds + 1))
+                else:
+                    _svc_status.set(_T("启动中，若长时间无响应请检查所选目录是否正确"))
+
+            btn_fr = tk.Frame(inner, bg="#FFFFFF")
+            btn_fr.pack(anchor="w", pady=(8, 0))
+            ttk.Button(btn_fr, text=_T("一键启动语音服务"), command=_start_svc).pack(side="left")
+            ttk.Button(btn_fr, text=_T("停止服务"), command=_stop_svc).pack(side="left", padx=(8, 0))
+            tk.Label(btn_fr, textvariable=_svc_status, bg="#FFFFFF", fg="#2F7D32",
+                     font=("微软雅黑", 9)).pack(side="left", padx=(10, 0))
 
             def _pick(title, exts, key, initialdir=None):
                 from tkinter import filedialog
@@ -326,31 +447,17 @@ class _EngineDlg:
                 inner, _T("语速（1.0 = 正常，0.5 慢一倍，2.0 快一倍）"),
                 c.get("speed", "1.0"))
 
-            def _copy_cmd():
-                cmd = "runtime\\python.exe api.py -p 9880"
-                self.top.clipboard_clear()
-                self.top.clipboard_append(cmd)
-                from tkinter import messagebox
-                messagebox.showinfo(_T("已复制"), _T("启动命令已复制，去 GPT-SoVITS 文件夹地址栏输入 cmd 回车后粘贴即可"))
-
-            btn_fr = tk.Frame(inner, bg="#FFFFFF")
-            btn_fr.pack(anchor="w", pady=(8, 0))
-            ttk.Button(btn_fr, text=_T("复制启动命令"), command=_copy_cmd).pack(side="left")
-            tk.Label(btn_fr, text="  runtime\\python.exe api.py -p 9880",
-                     bg="#FFFFFF", fg="#888888", font=("Consolas", 9)).pack(side="left")
-
             self._note(inner, _T(
                 "怎么用（第一次照做，以后不用再看）：\n"
-                "① 先启动语音服务：打开你的 GPT-SoVITS 文件夹，在地址栏输入 cmd 回车，\n"
-                "   弹出黑窗口后输入 runtime\\python.exe api.py -p 9880 回车，\n"
-                "   等出现 Uvicorn running on http://127.0.0.1:9880 就好了，黑窗口别关。\n"
-                "② 填音色名（你训练时起的名字）。\n"
+                "① 先点上面的「选择目录…」选你的 GPT-SoVITS 文件夹。\n"
+                "② 点「一键启动语音服务」，等状态变成「服务已就绪（端口 9880）」即可。\n"
+                "   （手动启动也一样：Windows 集成包在根目录运行 runtime\\python.exe api.py -p 9880；\n"
+                "    macOS / Linux 源码版运行 python3 api.py -p 9880；N 卡加 -d cuda，Apple 芯片加 -d mps）\n"
                 "③ 用浏览按钮选两个模型文件：.ckpt 在 GPT_weights_v2Pro 文件夹，.pth 在 SoVITS_weights_v2Pro。\n"
                 "④ 用浏览按钮选一段参考语音：在 logs/你起的音色名/5-wav32k 里挑一段清晰的。\n"
                 "⑤ 把这段语音里说的原话一字不差填到最下面那栏。\n"
                 "⑥ 点保存并使用，就能用你自己训练的音色朗读了。\n"
-                "这是本地服务，不用联网也不用代理。外部音色也支持整本缓存。\n"
-                "注意：每次开机想用这个音色，都要先做第①步启动服务。"))
+                "三个系统用的是同一个服务（端口 9880）。外部音色也支持整本缓存。"))
             return
 
         if kind == "custom":
@@ -454,7 +561,7 @@ class _EngineDlg:
             label = f"vits·{names}"
         elif kind == "google":
             sel_txt = self.lang_cb.get()
-            lang = next((k for k, n in _GOOGLE_LANGS if sel_txt.startswith(n)), "zh-CN")
+            lang = next((k for k, n in _GOOGLE_LANGS if sel_txt.startswith(_T(n))), "zh-CN")
             payload = {"lang": lang}
             label = f"Google·{lang}"
         elif kind == "volcano":

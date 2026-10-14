@@ -16,6 +16,7 @@ v3 新增双后端：
 import os
 import json
 import hashlib
+import subprocess
 
 import asyncio
 import queue
@@ -179,6 +180,99 @@ def _http_read(req, timeout=30, proxy=None):
     except http.client.IncompleteRead as e:
         # GPT-SoVITS 等服务 chunked 结尾不规范，已收到的音频数据照样可用
         return bytes(e.partial)
+
+
+# ---------- GPT-SoVITS 本地服务：播放/缓存前自动启动 ----------
+
+_gptsovits_proc = None
+
+
+def _gptsovits_port_open(port=9880, timeout=0.4):
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+    finally:
+        s.close()
+
+
+def _gptsovits_find_python(root_dir):
+    # 三平台同一个 api.py：Windows 集成包用 runtime\python.exe；
+    # Mac/Linux 集成包是 runtime/bin/python3（或 runtime/python）；
+    # 源码部署没有 runtime，回退 PATH 里的系统 python3 / python。
+    if os.name == "nt":
+        cands = [os.path.join(root_dir, "runtime", "python.exe")]
+    else:
+        cands = [
+            os.path.join(root_dir, "runtime", "bin", "python3"),
+            os.path.join(root_dir, "runtime", "bin", "python"),
+            os.path.join(root_dir, "runtime", "python"),
+        ]
+    for p in cands:
+        if os.path.isfile(p):
+            return p
+    import shutil
+    for exe in ("python3", "python"):
+        p = shutil.which(exe)
+        if p:
+            return p
+    return None
+
+
+def ensure_gptsovits_service(settings):
+    """确保 GPT-SoVITS 本地服务可用（端口 9880）。
+
+    填过根目录：端口没开就自动后台拉起服务并等待就绪（最长 60 秒）。
+    没填根目录：返回 (False, "no_root")，由 UI 引导去设置里选择。
+    返回 (ok, reason)：ok=True 时 reason ∈ port_open / started；
+    ok=False 时 reason ∈ no_root / no_python / launch_error / timeout。
+    """
+    global _gptsovits_proc
+    if _gptsovits_port_open():
+        return True, "port_open"
+    root = (settings or {}).get("gptsovits_root", "")
+    if not root or not os.path.isdir(root):
+        return False, "no_root"
+    py = _gptsovits_find_python(root)
+    if not py:
+        return False, "no_python"
+    try:
+        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        _gptsovits_proc = subprocess.Popen(
+            [py, "api.py", "-p", "9880"], cwd=root, creationflags=flags)
+    except Exception:
+        return False, "launch_error"
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if _gptsovits_port_open():
+            return True, "started"
+        time.sleep(1)
+    return False, "timeout"
+
+
+def ensure_gptsovits_service_async(settings, on_done):
+    """后台线程运行 ensure_gptsovits_service，完成后回调 on_done(ok, why)。
+
+    用于 UI 线程：启动最长可能 60 秒，同步调用会假死界面。
+    回调在后台线程执行，UI 侧需要用 root.after(0, ...) 切回主线程再操作 Tk。
+    """
+    def _run():
+        ok, why = False, "launch_error"
+        try:
+            ok, why = ensure_gptsovits_service(settings)
+        except Exception:
+            ok, why = False, "launch_error"
+        try:
+            on_done(ok, why)
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def is_gptsovits_voice(voice_id):
+    """判断 voice_id 是否指向 GPT-SoVITS 引擎（ext:gptsovits:…）。"""
+    return str(voice_id or "").split(":", 2)[1:2] == ["gptsovits"]
 
 
 def synth_external(text, voice_id, rate=200):
@@ -876,6 +970,12 @@ class SpeechController:
     def set_rate(self, rate):
         with self._cv:
             self._rate = int(rate)
+
+    def is_gptsovits_active(self):
+        """当前选中的外部语音是否是 GPT-SoVITS（GUI 线程调用，只读）。"""
+        with self._cv:
+            return (self._backend == "external"
+                    and is_gptsovits_voice(self._external_voice))
 
     # ---------- 多人有声（句子级音色切换，仅 Edge 后端） ----------
     def set_multi_voice(self, roles_map, dialogues):

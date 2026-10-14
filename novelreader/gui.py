@@ -51,7 +51,15 @@ class NovelReaderBase:
         self._title_char_len = 0       # 章节标题+换行的字符数，用于位置换算
         self._body_start_line = 1      # 正文在显示文本中的起始行号
         self.settings = dict(self.storage.settings())
-        from .i18n import set_lang as _set_lang
+        from .i18n import set_lang as _set_lang, detect_system_lang as _detect_lang
+        if "ui_lang" not in self.settings:
+            # 首次启动：读取系统默认语言（zh/en/ja/ko，其他系统默认英语），并持久化
+            _det = _detect_lang()
+            self.settings["ui_lang"] = _det
+            try:
+                self.storage.set_setting("ui_lang", _det)
+            except Exception:
+                pass
         _set_lang(self.settings.get("ui_lang", "zh"))
         self._save_timer = None
         self._cache = {}

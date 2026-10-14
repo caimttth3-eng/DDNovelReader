@@ -38,6 +38,49 @@ from .constants import (
 
 class DownloadMixin:
     """整本缓存下载管理器：多书任务列表 / 章节选择 / 暂停继续 / 继续上次 / 自动关机"""
+    def _ensure_gptsovits_for_cache(self, on_ready=None):
+        """GPT-SoVITS 引擎缓存前：目录未填→引导去设置（返回 False）；
+        填过但服务没启动→弹动画窗后台启动，就绪后回调 on_ready()（返回 False，表示稍后自动继续）；
+        服务已就绪→返回 True 可继续缓存。不阻塞 UI。"""
+        try:
+            if getattr(self.tts, "is_gptsovits_active", lambda: False)():
+                from . import tts_engine
+                root = (self.settings or {}).get("gptsovits_root", "")
+                if not root or not os.path.isdir(root):
+                    if messagebox.askyesno(
+                            _T("提示"),
+                            _T("使用 GPT-SoVITS 前需要先选择它的根目录（设置→语音引擎→GPT-SoVITS）。现在去设置？"),
+                            parent=getattr(self, "_cache_book_dlg", None)):
+                        self._show_engines_dialog()
+                    return False
+                if tts_engine._gptsovits_port_open():
+                    return True
+                if getattr(self, "_gptsovits_starting", False):
+                    return False  # 已在启动中，动画窗还开着
+                parent = getattr(self, "_cache_book_dlg", None)
+
+                self._gptsovits_starting = True
+
+                def _done(ok, why):
+                    if not ok:
+                        msg = {
+                            "no_python": _T("在所选 GPT-SoVITS 目录的 runtime 里没找到 Python（需要 GPT-SoVITS 集成包，不是源码解压）"),
+                            "launch_error": _T("GPT-SoVITS 服务启动失败，请到语音引擎里点「一键启动」看具体提示"),
+                            "timeout": _T("GPT-SoVITS 服务启动超时（60 秒），请到语音引擎里检查目录是否正确"),
+                        }.get(why, _T("GPT-SoVITS 服务不可用"))
+                        messagebox.showinfo(_T("提示"), msg, parent=parent)
+                        return
+                    if on_ready:
+                        try:
+                            on_ready()
+                        except Exception:
+                            pass
+
+                self._show_gptsovits_starting(_done)
+                return False
+        except Exception:
+            pass
+        return True
     def _open_cache_dialog(self):
         """整本缓存管理窗口（下载管理器）：列出书架所有书，多本可同时缓存。"""
         if getattr(self, "_cache_dlg", None) and self._cache_dlg.winfo_exists():
@@ -612,6 +655,12 @@ class DownloadMixin:
         if idx == set() or (idx is not None and len(idx) == 0):
             messagebox.showinfo(_T("提示"), _T("请先选择至少一个要缓存的章节"), parent=self._cache_book_dlg)
             return
+        # GPT-SoVITS：缓存前先确保本地服务可用；未启动时弹动画窗后台启动，就绪后自动继续
+        if not self._ensure_gptsovits_for_cache(lambda: self._cache_start_impl(book, bid, idx)):
+            return
+        self._cache_start_impl(book, bid, idx)
+
+    def _cache_start_impl(self, book, bid, idx):
         st = self.tts.start_book_cache(book, bid, idx)
         if st is None:
             return
@@ -653,6 +702,11 @@ class DownloadMixin:
             self._cache_sync_state()
             return
         self._cache_select_all()
+        if not self._ensure_gptsovits_for_cache(lambda: self._cache_continue_impl(book, bid)):
+            return
+        self._cache_continue_impl(book, bid)
+
+    def _cache_continue_impl(self, book, bid):
         st = self.tts.start_book_cache(book, bid, None, resume=True)
         if st is None:
             return

@@ -39,6 +39,110 @@ class TtsMixin:
     """TTS 控制：开始 / 暂停 / 继续 / 停止 / 语速 / 音量 / 语音切换"""
     def _start_tts(self, book, ci, off):
         """统一朗读入口（多人有声模块已下线，保留此入口供 tts_ui / reader_ui 调用）。"""
+        # GPT-SoVITS：目录未填→同步引导；填过但服务未启动→弹动画窗后台启动（不卡界面），
+        # 启动完成后自动继续朗读。
+        try:
+            if getattr(self.tts, "is_gptsovits_active", lambda: False)():
+                self._ensure_gptsovits_async(
+                    lambda ok, why: self._on_gptsovits_ready(ok, why, book, ci, off))
+                return
+        except Exception:
+            pass  # 探测/启动逻辑异常不影响正常朗读
+        self.tts.start(book, ci, off)
+
+    def _ensure_gptsovits_async(self, on_done):
+        """GPT-SoVITS 引擎统一引导：目录未填→同步弹窗引导（on_done(False,'no_root')）；
+        填过但端口没开→弹非模态动画窗，后台线程启动，完成回调 on_done(ok, why)。
+        已在启动中→直接忽略（动画窗还开着，防重复）。"""
+        from . import tts_engine
+        root = (self.settings or {}).get("gptsovits_root", "")
+        if not root or not os.path.isdir(root):
+            if messagebox.askyesno(
+                    _T("提示"),
+                    _T("使用 GPT-SoVITS 前需要先选择它的根目录（设置→语音引擎→GPT-SoVITS）。现在去设置？")):
+                self._show_engines_dialog()
+            on_done(False, "no_root")
+            return
+        if tts_engine._gptsovits_port_open():
+            on_done(True, "port_open")
+            return
+        if getattr(self, "_gptsovits_starting", False):
+            return
+        self._gptsovits_starting = True
+        self._show_gptsovits_starting(on_done)
+
+    def _show_gptsovits_starting(self, on_done):
+        """非模态提示窗：进度条动画 + 文案，后台线程启动服务。完成回调在 UI 线程执行。"""
+        from . import tts_engine
+        top = tk.Toplevel(self.root)
+        top.title(_T("提示"))
+        top.resizable(False, False)
+        try:
+            top.transient(self.root)
+        except Exception:
+            pass
+        try:
+            top.attributes("-topmost", True)
+        except Exception:
+            pass
+        frm = tk.Frame(top, padx=28, pady=20)
+        frm.pack()
+        tk.Label(frm, text=_T("正在启动…") + " GPT-SoVITS",
+                 font=("微软雅黑", 11, "bold")).pack()
+        bar = ttk.Progressbar(frm, mode="indeterminate", length=280)
+        bar.pack(pady=(14, 8))
+        bar.start(12)
+        tk.Label(frm, text=_T("启动中，若长时间无响应请检查所选目录是否正确"),
+                 fg="#888888", font=("微软雅黑", 9)).pack()
+        try:
+            top.update_idletasks()
+            w, h = top.winfo_width(), top.winfo_height()
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - w) // 2
+            y = self.root.winfo_rooty() + (self.root.winfo_height() - h) // 2
+            top.geometry("+%d+%d" % (max(x, 10), max(y, 10)))
+        except Exception:
+            pass
+
+        # 后台线程绝不直接碰 Tk（跨线程 after 会阻塞/死锁）。
+        # 只写状态字典，由动画窗主线程的 after 轮询收尾。
+        state = {"done": False, "ok": False, "why": ""}
+
+        def _finish(ok, why):
+            state["done"] = True
+            state["ok"] = bool(ok)
+            state["why"] = why or ""
+
+        def _poll():
+            if not top.winfo_exists():
+                return
+            if state["done"]:
+                self._gptsovits_starting = False
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
+                try:
+                    on_done(state["ok"], state["why"])
+                except Exception:
+                    pass
+                return
+            top.after(100, _poll)
+
+        top.after(100, _poll)
+        tts_engine.ensure_gptsovits_service_async(self.settings, _finish)
+
+    def _on_gptsovits_ready(self, ok, why, book, ci, off):
+        """GPT-SoVITS 服务就绪后继续朗读；失败给出对应提示。"""
+        if not ok:
+            if why == "no_root":
+                return  # 引导流程已提示过，避免重复弹窗
+            msg = {
+                "no_python": _T("选择的 GPT-SoVITS 文件夹里没有可用的 Python；\n源码部署的用户请先手动启动服务（python3 api.py -p 9880），再点保存。"),
+                "launch_error": _T("GPT-SoVITS 服务启动失败，请到语音引擎里点「一键启动」看具体提示"),
+                "timeout": _T("GPT-SoVITS 服务启动超时（60 秒），请到语音引擎里检查目录是否正确"),
+            }.get(why, _T("GPT-SoVITS 服务不可用"))
+            messagebox.showinfo(_T("提示"), msg)
+            return
         self.tts.start(book, ci, off)
     def _tts_toggle(self):
         """开始 / 暂停 / 继续 切换。"""

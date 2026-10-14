@@ -6,6 +6,16 @@ APP_NAME = "多多朗读"
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
     {
+        "version": "2.2",
+        "date": "2026-10-15",
+        "changes": [
+            "GPT-SoVITS 跨平台支持：Windows / macOS / Linux 三系统共用同一个 api.py 服务（python api.py -p 9880），源码部署用户自动回退系统 python3/python 一键启动，教程改三平台通用版（N 卡 -d cuda / Apple 芯片 -d mps）",
+            "语音引擎界面全量四语翻译：中/英/日/韩补齐 8 个引擎名、安装教程、字段、校验弹窗等全部文案；修复 Google 语言下拉在非中文界面不翻译、保存时匹配错语言的问题；日语字典 22 条误植韩文已修正",
+            "首次启动自动读取系统默认语言：Windows 读系统 UI 语言、macOS/Linux 读 locale，四语之外默认英文，之后尊重用户手选",
+            "点击播放 / 整本缓存自动启动 GPT-SoVITS 不再假死：服务启动移到后台线程，期间弹出进度条动画提示窗（正在启动… GPT-SoVITS），就绪后自动继续朗读/缓存，失败弹具体原因，可防止重复弹出",
+        ],
+    },
+    {
         "version": "2.1",
         "date": "2026-10-15",
         "changes": [
