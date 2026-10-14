@@ -62,3 +62,16 @@ downloads/
 # 根目录临时截图
 /_tb_*.png
 
+# 备用/历史 venv 与备份工程（不进仓库）
+.venv312/
+.venv3*/
+_v6c_work/
+
+# 发布中间产物（大文件走 GitHub Release，不进仓库）
+_release_artifacts/
+_release_final/
+_release_*.json
+
+# 凭证与密钥（绝不入库）
+_gh_token.txt
+
