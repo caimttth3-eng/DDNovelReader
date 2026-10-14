@@ -11,7 +11,8 @@
 
 | 功能 | 说明 |
 | --- | --- |
-| 主流格式 | txt / epub / mobi / azw3 / pdf / docx / html / zip（自动解包查找内部小说） |
+| 主流格式 | txt / epub / mobi / azw3 / pdf / docx / html / zip（自动解包查找内部小说）/ chm（CHM 电子书） |
+| CHM 电子书 | 内置 chmlib 解析库（Windows / macOS / Linux 三平台可用），自动抓取章节名与正文、剥离页面脚本与导航杂物，转成专用缓存后阅读；中文路径、GBK/UTF-8 编码自动兼容 |
 | TTS 语音朗读 | 默认本地语音（SAPI5，离线），可选 Edge 神经语音（晓晓/云希等 9 种中文音色，需联网）；开始/结束两个按钮；语速可调；句间隔可调；逐句高亮跟随（高亮固定窗口首行）；Edge 断网自动回退本地语音 |
 | 音量控制 | 功能区音量滑条，通过 Windows Core Audio 控制本进程音量，不影响系统音量和其他软件 |
 | 多媒体键 | Windows 下支持蓝牙耳机 / 键盘媒体键控制朗读：播放/暂停键切换、停止键停止（软件为前台窗口时生效，与主流播放器一致） |
@@ -190,7 +191,7 @@ DDNovelReader/
 - 朗读：pyttsx3（Windows SAPI5）+ edge-tts（微软 Edge 神经语音）
 - 音频播放：Windows MCI（winmm.dll，零第三方依赖）
 - 音量控制：pycaw（Windows Core Audio，进程级音量）
-- 解析：ebooklib（epub）、mobi（mobi/azw3）、pypdfium2（pdf，PDFium 引擎）、python-docx（docx）、zipfile（zip）
+- 解析：ebooklib（epub）、mobi（mobi/azw3）、pypdfium2（pdf，PDFium 引擎）、python-docx（docx）、zipfile（zip）、chmlib 内置库（chm，Zig 交叉编译 Windows/macOS/Linux 三平台）
 - 拖拽：tkinterdnd2（Tcl tkdnd 扩展）
 - 打包：PyInstaller onefile（内置 Tcl/Tk 与全部依赖，绿色免安装）
 
@@ -211,6 +212,15 @@ MIT License
   - 运行：python -m novelreader.main（数据目录自动使用用户主目录 ~/DDNovelReader）
 
 ## 版本历史
+
+### v2.1（2026-10-15）
+- 新增 .chm 电子书导入：内置 chmlib 库（Windows / macOS / Linux 三平台均可用），自动抓取章节名与正文、剥离脚本与导航杂物，转成专用缓存后阅读
+- 修复 CHM 中文路径无法打开：按系统代码页编码路径，生僻字自动复制临时文件兜底
+- 修复网文合订本 CHM 正文抓取：优先提取 .txt 章节页、剥离 document.write 脚本壳、章节名自动从标题提取
+- 解码器升级：按解码质量（CJK 占比）自动选择编码，修复 GBK 文本被误判为 UTF-8 产生乱码的问题（txt / epub / pdf 一并受益）
+
+### v2.0V6c（2026-10-10）
+- 新增 ← / → 方向键快捷键：上一句 / 下一句朗读（← 为上一句，而不是回到本句开头）
 
 ### v2.0V6（2026-10-01）
 - 修复搜索/翻译功能：打包后的 exe 里右键点击百度/谷歌/必应搜索、百度/谷歌/搜狗翻译无反应，改用 Windows 原生 os.startfile() 后正常打开浏览器
