@@ -6,6 +6,23 @@ APP_NAME = "多多朗读"
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
     {
+        "version": "2.1",
+        "date": "2026-10-15",
+        "changes": [
+            "新增 .chm 电子书导入：内置 chmlib 库（Zig 交叉编译，Windows / macOS / Linux 三平台均可用），CHM 解析为章节名 + 正文的专用缓存后阅读",
+            "修复 CHM 中文路径无法打开：chmlib 内部使用 ANSI 代码页打开文件，按系统代码页编码路径，生僻字自动复制临时文件兜底",
+            "修复网文合订本 CHM 正文抓取：优先提取 .txt 章节页、剥离 document.write 的 JS 壳、章节名自动从 <b> 标题提取",
+            "解码器升级：按解码质量（CJK 占比）自动选择编码，修复 GBK 文本被误判为 UTF-8 产生乱码的问题（txt/epub/pdf 一并受益）",
+        ],
+    },
+    {
+        "version": "2.0V6c",
+        "date": "2026-10-10",
+        "changes": [
+            "新增 ← / → 方向键快捷键：上一句 / 下一句朗读（← 为上一句，而不是回到本句开头）",
+        ],
+    },
+    {
         "version": "2.0V6",
         "date": "2026-10-01",
         "changes": [
@@ -333,6 +350,7 @@ SHORTCUTS = [
     ("Space / Ctrl+P", "开始 / 暂停 / 继续朗读", "Start / pause / resume reading", "朗読を開始 / 一時停止 / 再開", "낭독 시작 / 일시정지 / 재개"),
     ("Ctrl+S", "停止朗读", "Stop reading", "朗読を停止", "낭독 중지"),
     ("Ctrl+R", "从当前屏顶部段落开始朗读", "Read from top of screen", "画面最上部の段落から朗読", "화면 상단 단락부터 낭독"),
+    ("← / →", "上一句 / 下一句（朗读中跳转）", "Previous / next sentence", "前の文 / 次の文", "이전 문장 / 다음 문장"),
     # 排版
     ("+ / -（主键盘或小键盘）", "增大 / 减小字号", "Increase / decrease font size", "文字サイズを拡大 / 縮小", "글자 크기 확대 / 축소"),
     ("0", "重置字号为默认", "Reset font size to default", "文字サイズを既定に戻す", "글자 크기 기본값으로 초기화"),

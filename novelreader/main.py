@@ -10,7 +10,24 @@ import sys
 
 
 def _setup_tcltk():
-    """为 tkinter 定位 Tcl/Tk 脚本库。本机 Python 为精简发行版时必需。"""
+    """为 tkinter 定位 Tcl/Tk 脚本库。本机 Python 为精简发行版时必需。
+
+    Tcl9（Python 3.14）：脚本库内嵌于 tcl90.dll（zipfs），无需外部脚本库，
+    若把 TCL_LIBRARY 指向 8.6 脚本库会造成版本冲突导致窗口无法创建。
+    """
+    # 检测 Tcl 版本：Tcl9 则清除并跳过外部脚本库（此判断必须在环境变量之前）
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        _tcl9 = os.path.isfile(os.path.join(base, "tcl90.dll")) or os.path.isfile(
+            os.path.join(os.path.dirname(sys.executable), "tcl90.dll"))
+    else:
+        py = os.path.dirname(sys.executable)
+        _tcl9 = os.path.isfile(os.path.join(py, "DLLs", "tcl90.dll")) or os.path.isfile(
+            os.path.join(py, "tcl90.dll"))
+    if _tcl9:
+        os.environ.pop("TCL_LIBRARY", None)
+        os.environ.pop("TK_LIBRARY", None)
+        return
     if os.environ.get("TCL_LIBRARY") and os.path.exists(os.environ["TCL_LIBRARY"]):
         return
     candidates = []
@@ -61,7 +78,12 @@ def _enable_dpi_awareness():
 
 
 def main():
+    def _dbg(*a):
+        if os.environ.get("DD_DEBUG"):
+            print("[main]", *a, flush=True)
+    _dbg("m1 dpi")
     _enable_dpi_awareness()
+    _dbg("m2 tcltk")
     _setup_tcltk()
     if getattr(sys, "frozen", False):
         BASE = os.path.dirname(sys.executable)
@@ -75,12 +97,14 @@ def main():
 
     from novelreader.single_instance import SingleInstance
 
+    _dbg("m3 single")
     _si = SingleInstance()
     if not _si.acquired:
         if not _si.notify_existing():
             sys.stderr.write("DDNovelReader: single-instance port busy; cannot start a second instance.\n")
         return
 
+    _dbg("m4 import tk")
     import tkinter as tk
 
     from novelreader.gui import NovelReaderApp
@@ -92,7 +116,9 @@ def main():
         root = TkinterDnD.Tk()
     except Exception:
         root = tk.Tk()
+    _dbg("m5 root made")
     app = NovelReaderApp(root)
+    _dbg("m6 app made")
 
     # 轮询单实例激活队列：收到请求就在主线程还原窗口（线程安全）
     _q = _queue.Queue()
@@ -111,7 +137,9 @@ def main():
             pass
 
     root.after(200, _poll_activate)
+    _dbg("m7 mainloop")
     root.mainloop()
+    _dbg("m8 exited")
 
 
 if __name__ == "__main__":

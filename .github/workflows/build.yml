@@ -50,8 +50,12 @@ jobs:
         run: |
           python -m compileall -q novelreader
           python -c "import novelreader.tts_engine as t; assert t._IS_WINDOWS is False, 'macOS 应走 pygame'"
+      - name: Detect arch
+        id: arch
+        run: |
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
       - name: Build
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 novelreader/main.py
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-binary "chmlib_libs/macos-${{ steps.arch.outputs.arch }}/libchmlib.dylib:." novelreader/main.py
       - name: Package
         run: |
           ditto -c -k --sequesterRsrc --keepParent dist/DDNovelReader.app DDNovelReader-macOS.zip
@@ -81,7 +85,7 @@ jobs:
           python3 -m compileall -q novelreader
           python3 -c "import novelreader.tts_engine as t; assert t._IS_WINDOWS is False, 'Linux 应走 pygame'"
       - name: Build
-        run: python3 -m PyInstaller --noconfirm --clean --onefile --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 novelreader/main.py
+        run: python3 -m PyInstaller --noconfirm --clean --onefile --name DDNovelReader --collect-all tkinterdnd2 --collect-submodules pyttsx3 --add-binary "chmlib_libs/linux-x64/libchmlib.so:." novelreader/main.py
       - uses: actions/upload-artifact@v4
         with:
           name: DDNovelReader-Linux

@@ -416,7 +416,7 @@ class DialogMixin:
 
         tk.Label(top, text=_T("更多功能请从主界面「设置」打开（缓存管理 / 快捷键说明 / 更新记录）。"),
                  fg="#8a5a00", bg=_bg, font=("微软雅黑", 9),
-                 wraplength=560, justify="left").pack(anchor="w", padx=20, pady=(8, 12))
+                 wraplength=560, justify="left").pack(anchor="w", padx=20, pady=(8, 4))
 
         # 按内容自适应大小并居中（长文本已换行，窗口刚好放下内容）
         top.update_idletasks()

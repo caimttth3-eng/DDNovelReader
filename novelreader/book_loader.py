@@ -1,7 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
 """小说文件解析引擎：把 txt / epub / mobi / azw3 / pdf / docx / html 统一解析为 BookContent。"""
+import codecs
 import os
 import re
+import unicodedata
 import zipfile
 from html.parser import HTMLParser
 
@@ -18,6 +20,7 @@ except Exception:  # pragma: no cover
 
 SUPPORTED_EXTS = {
     ".txt", ".epub", ".mobi", ".azw3", ".pdf", ".docx", ".html", ".htm", ".zip",
+    ".chm",
 }
 
 
@@ -84,18 +87,49 @@ class BookContent:
 
 # ---------------- 文本处理 ----------------
 
+def _text_quality(s: str) -> float:
+    """解码质量打分：CJK 占比高、无替换符/控制字符的候选更可信。
+
+    GBK 字节流经常"碰巧"是合法 UTF-8（解码成功但全是乱码拉丁字符），
+    单靠 try/except 无法区分，必须按解码结果的质量选。
+    """
+    if not s:
+        return -1.0
+    total = max(len(s), 1)
+    cjk = sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+    repl = s.count("\ufffd")
+    ctrl = sum(
+        1 for ch in s if unicodedata.category(ch) == "Cc" and ch not in "\n\r\t"
+    )
+    return cjk / total * 2.0 - repl / total * 5.0 - ctrl / total * 3.0
+
+
 def _decode(raw: bytes) -> str:
-    """多编码探测解码，保证中文 txt 正确读取。"""
-    for enc in ("utf-8-sig", "utf-8", "gb18030", "big5", "utf-16"):
+    """多编码探测解码，保证中文 txt 正确读取。
+
+    按解码质量打分选择（UTF-8 优先，但 GBK 误判为 UTF-8 时能纠正），
+    避免网文 GBK 文本被错误解码成乱码。
+    """
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig")
+    if raw.startswith(codecs.BOM_UTF16_LE) or raw.startswith(codecs.BOM_UTF16_BE):
+        return raw.decode("utf-16")
+    best = None
+    for enc in ("utf-8", "gb18030", "big5"):
         try:
-            return raw.decode(enc)
+            s = raw.decode(enc)
         except (UnicodeDecodeError, ValueError):
             continue
+        score = _text_quality(s)
+        if best is None or score > best[0]:
+            best = (score, s)
+    if best is not None and best[0] >= 0.6:
+        return best[1]
     try:
         from charset_normalizer import from_bytes
-        best = from_bytes(raw).best()
-        if best is not None and str(best):
-            return str(best)
+        b = from_bytes(raw).best()
+        if b is not None and str(b):
+            return str(b)
     except Exception:
         pass
     return raw.decode("utf-8", errors="replace")
@@ -172,7 +206,7 @@ class _TextExtractor(HTMLParser):
         return re.sub(r"\n{3,}", "\n\n", s)
 
 
-def _extract_html(raw: bytes) -> str:
+def _extract_html(raw) -> str:
     if isinstance(raw, bytes):
         raw = _decode(raw)
     p = _TextExtractor()
@@ -181,6 +215,42 @@ def _extract_html(raw: bytes) -> str:
     except Exception:
         pass
     return p.text()
+
+
+_DOC_WRITE_RE = re.compile(
+    r"""document\.write\s*\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')""",
+    re.I,
+)
+
+
+def _chm_js_html_to_text(raw: bytes):
+    """把 CHM 里 JS 包裹的 HTML 页转成 (标题, 正文纯文本)。
+
+    很多网文合订本 CHM 的"txt 页"实际是多个 document.write("...") 拼接的
+    HTML（用于页面动态渲染），需要先剥 JS 壳、解转义，再走 HTML 提取；
+    顺带从 <b> / <h1-6> / <a name> 里抠出章节标题。
+    """
+    s = _decode(raw)
+    segs = []
+    for m in _DOC_WRITE_RE.finditer(s):
+        seg = m.group(1) if m.group(1) is not None else m.group(2)
+        seg = seg.replace(r"\"", '"').replace(r"\'", "'").replace(r"\\", "\\")
+        seg = seg.replace(r"\n", "\n").replace(r"\t", "\t")
+        segs.append(seg)
+    htm = "\n".join(segs) if segs else s
+
+    title = ""
+    m = re.search(r"<b[^>]*>(.*?)</b>", htm, re.S | re.I)
+    if not m:
+        m = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", htm, re.S | re.I)
+    if not m:
+        m = re.search(r"<a[^>]*name=[\"']?([^\"'>\s]+)", htm, re.I)
+    if m:
+        t = re.sub(r"<[^>]+>", "", m.group(1))
+        t = t.replace("&nbsp;", " ").strip(" \u3000")
+        if t:
+            title = t
+    return title, _extract_html(htm)
 
 
 # ---------------- 各格式解析 ----------------
@@ -344,6 +414,74 @@ def _parse_html(path):
     return BookContent(title, "", "html", _make_chapters(text))
 
 
+def _natural_key(name):
+    """把 '1.html'、'2.html'、'10.html' 按数字自然排序。"""
+    return [int(t) if t.isdigit() else t.lower()
+            for t in re.split(r"(\d+)", name)]
+
+
+def _parse_chm(path):
+    """解析 CHM 帮助文档/电子书：内置 chmlib 解包，正文优先取 .txt 章节页（网文合订本常见），其次 .html 页面。"""
+    from .chm_reader import CHMReader, CHMError
+
+    try:
+        reader = CHMReader(path)
+    except CHMError as e:
+        raise ValueError(str(e))
+    try:
+        files = reader.list_files()
+
+        def _candidates(ext):
+            return [p for p in files
+                    if p.lower().endswith(ext) and not p.startswith(("/#", "/$", "/::"))
+                    and not p.endswith("/")]
+
+        txt_pages = _candidates(".txt")
+        html_pages = _candidates((".html", ".htm"))
+        # 优先 txt（章节正文通常按 1_001.txt / 2_001.txt 命名），没有才用 html
+        if txt_pages:
+            raw_pages = txt_pages
+            use_txt = True
+        else:
+            raw_pages = html_pages
+            use_txt = False
+
+        pages = []
+        for p in raw_pages:
+            try:
+                raw = reader.read_file(p)
+            except CHMError:
+                continue
+            if not raw:
+                continue
+            if use_txt:
+                title, text = _chm_js_html_to_text(raw)
+            else:
+                title, text = "", _extract_html(raw)
+            if not text or len(text) < 20:  # 过滤导航页/空页
+                continue
+            if not title or len(title) < 2 or title.isdigit():
+                base = os.path.splitext(os.path.basename(p))[0].strip()
+                title = _guess_chapter_title(text) or base
+            pages.append((_natural_key(p), title, text))
+
+        if not pages:
+            raise ValueError("CHM 内未提取到正文页面")
+        # 按路径自然排序，保证章节顺序（001.html → 002.html → 010.html）
+        pages.sort(key=lambda x: x[0])
+        chapters = [Chapter(t, normalize_body(b)) for _, t, b in pages]
+
+        # 单页超大文本：尝试内部再切分（整本书塞进一个文件的情况）
+        if len(chapters) == 1 and len(chapters[0].content) > 40000:
+            spl = split_chapters(chapters[0].content)
+            if spl and len(spl) >= 2:
+                chapters = [Chapter(t, normalize_body(b)) for t, b in spl]
+        title = os.path.splitext(os.path.basename(path))[0]
+        return BookContent(title, "", "chm", chapters)
+    finally:
+        reader.close()
+
+
 def _parse_zip(path):
     """解析 zip 压缩包：自动查找其中的 txt / epub 小说文件。"""
     import tempfile
@@ -423,6 +561,7 @@ _PARSERS = {
     ".html": _parse_html,
     ".htm": _parse_html,
     ".zip": _parse_zip,
+    ".chm": _parse_chm,
 }
 
 

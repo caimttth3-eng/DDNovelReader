@@ -49,7 +49,7 @@ class TtsMixin:
             self.tts.resume()
             self._set_tts_ui("playing")
         else:
-            self.tts.start(self.book, self.chapter_idx, self.char_offset)
+            self._start_tts(self.book, self.chapter_idx, self.char_offset)
             self._set_tts_ui("playing")
     def _tts_stop(self):
         self.tts.stop()
@@ -183,6 +183,46 @@ class TtsMixin:
         self._on_volume_change(v)
     def _shortcut_tts_toggle(self, event=None):
         self._tts_toggle()
+        return "break"
+
+    def _jump_sentence(self, delta):
+        """快捷键 ← / →：跳到上一句 / 下一句（朗读中则从新句子继续读）。"""
+        if not self.book:
+            return "break"
+        content = self.book.chapters[self.chapter_idx].content
+        n = len(content)
+        off = self.char_offset
+        if delta > 0:
+            # 下一句：从当前位置向后找句末标点
+            i = off
+            while i < n:
+                if content[i] in "。！？!?…；;":
+                    off = i + 1
+                    break
+                i += 1
+            else:
+                return "break"  # 已在章节末尾
+        else:
+            # 上一句：直接跳到上一句的起点
+            cur = self._sentence_start(off)
+            if cur > 0:
+                off = self._sentence_start(cur - 1)
+            elif off > 0:
+                off = 0  # 第一句中间 → 回到第一句开头
+            else:
+                return "break"  # 已在第一句开头
+        off = min(off, n)
+        self.char_offset = off
+        was_active = self.tts.is_active()
+        if was_active:
+            # 朗读中：直接切换朗读位置，继续朗读
+            self._start_tts(self.book, self.chapter_idx, off)
+            self._set_tts_ui("playing")
+        else:
+            # 未朗读：仅跳转阅读位置
+            self._scroll_to_offset(off)
+            self._update_status()
+            self._schedule_save()
         return "break"
 
     def _has_any_book_cache(self):

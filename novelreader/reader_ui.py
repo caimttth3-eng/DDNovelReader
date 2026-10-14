@@ -358,7 +358,7 @@ class ReaderMixin:
             off = self._sentence_start(raw_off)
         self._goto_chapter(self.chapter_idx, off)  # 渲染/保存；正在朗读则自动继续
         if not self.tts.is_active():
-            self.tts.start(self.book, self.chapter_idx, off)
+            self._start_tts(self.book, self.chapter_idx, off)
             self._set_tts_ui("playing")
         self._flash_status(_T("已从该段开始朗读"))
     def _display_col_to_raw_offset(self, col):
@@ -427,7 +427,7 @@ class ReaderMixin:
         self._schedule_save()
         if was_active:
             # 换章后继续朗读：从新章节当前位置接着读
-            self.tts.start(self.book, ci, offset)
+            self._start_tts(self.book, ci, offset)
             self._set_tts_ui("playing")
     def _on_chapter_cb(self, event):
         try:

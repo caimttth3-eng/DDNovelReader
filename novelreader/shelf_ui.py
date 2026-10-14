@@ -153,6 +153,10 @@ class ShelfMixin:
         self.shelf_menu.entryconfigure(_T("复制原文件"), state="disabled" if (multi or not src_ok) else "normal")
         self.shelf_menu.entryconfigure(_T("复制书名"), state="disabled" if multi else "normal")
         try:
+            self._mv_refresh_menu_state()
+        except Exception:
+            pass
+        try:
             self.shelf_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.shelf_menu.grab_release()

@@ -91,9 +91,10 @@ UI_THEMES = {
 }
 
 FILE_TYPES = [
-    ("支持的小说格式", "*.txt *.epub *.mobi *.azw3 *.pdf *.docx *.html *.htm *.zip"),
+    ("支持的小说格式", "*.txt *.epub *.mobi *.azw3 *.pdf *.docx *.html *.htm *.zip *.chm"),
     ("文本文件", "*.txt"),
     ("电子书", "*.epub *.mobi *.azw3"),
+    ("CHM 电子书", "*.chm"),
     ("压缩包", "*.zip"),
     ("PDF 文档", "*.pdf"),
     ("Word 文档", "*.docx"),

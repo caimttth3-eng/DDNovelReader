@@ -801,6 +801,10 @@ class SpeechController:
         self._external_voice = None
         self._edge_prefetch = None
         self._edge_fail_posted = False
+        # 多人有声（句子级音色切换）：仅 Edge 后端生效
+        self._multi_roles = None       # {角色名: voice_id}；None=未启用
+        self._multi_dialogues = None   # 当前章对白区间表 {ci: [[start,end,role],...]}
+        self._cur_voice = None         # 当前句音色（多人有声按句覆盖，None=用默认语音）
         self._tts_cache_dir = None
         self._cache_workers = 6  # 整本缓存并发下载线程数（gui 启动时从设置读取）
         # 整本语音缓存：按 book_id 管理，每本书独立缓存器，互不阻塞（支持多书同时缓存）
@@ -873,6 +877,48 @@ class SpeechController:
         with self._cv:
             self._rate = int(rate)
 
+    # ---------- 多人有声（句子级音色切换，仅 Edge 后端） ----------
+    def set_multi_voice(self, roles_map, dialogues):
+        """启用多人有声朗读。
+
+        roles_map: {角色名: Edge voice_id}；未列出的角色/旁白用默认语音。
+        dialogues: 当前章节的对白区间表 {ci: [[start, end, role], ...]}（原文偏移）。
+        """
+        with self._cv:
+            self._multi_roles = roles_map or None
+            self._multi_dialogues = dialogues or {}
+            self._cur_voice = None
+
+    def clear_multi_voice(self):
+        """关闭多人有声，恢复单语音朗读。"""
+        with self._cv:
+            self._multi_roles = None
+            self._multi_dialogues = None
+            self._cur_voice = None
+
+    def _resolve_cur_voice(self, ci, orig_off):
+        """多人有声：按句子原文偏移解析该句角色音色；未启用/未命中返回 None（用默认语音）。"""
+        with self._cv:
+            roles = self._multi_roles
+            dia = self._multi_dialogues
+            default_voice = self._edge_voice
+        if not roles or not dia:
+            return None
+        spans = dia.get(ci)
+        if not spans:
+            return None
+        role = None
+        for start, end, r in spans:
+            if start <= orig_off < end:
+                role = r
+                break
+        if not role or role == "路人":
+            return None
+        voice = roles.get(role)
+        if not voice or voice == default_voice:
+            return None
+        return voice
+
     def set_sentence_gap(self, gap):
         """句子之间的停顿间隔（秒），默认 0.10。"""
         with self._cv:
@@ -936,7 +982,7 @@ class SpeechController:
             is_ext = (self._backend == "external")
             if not is_ext and self._backend != "edge":
                 return None
-            voice = self._external_voice if is_ext else self._edge_voice
+            voice = self._external_voice if is_ext else (self._cur_voice or self._edge_voice)
             rate = int(self._rate)
         bid = self._book_id or "book"
         _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_ext else _sanitize_name(voice)
@@ -1542,6 +1588,10 @@ class SpeechController:
                 # 用当前句文本的实际起始位置（跳过句前空白），而不是 clean_off
                 actual_clean_off = clean_off + sent_start
                 orig_off = clean_to_orig(cmap, actual_clean_off, len(orig_content))
+                # 多人有声：按句子原文偏移解析该句角色音色（仅 Edge 后端）
+                if self._backend == "edge":
+                    with self._cv:
+                        self._cur_voice = self._resolve_cur_voice(ci, orig_off)
                 self._post(
                     {
                         "type": "sentence_start",
@@ -1634,7 +1684,7 @@ class SpeechController:
     # ---------- Edge 后端 ----------
     def _edge_synthesize(self, text):
         with self._cv:
-            voice = self._edge_voice
+            voice = self._cur_voice or self._edge_voice
             rate = self._rate
             backend = self._backend
             ext_voice = self._external_voice
@@ -1644,11 +1694,19 @@ class SpeechController:
         return synth_audio(text, voice, rate)
 
     def _speak_edge(self, text, gen, ci, off, content, next_off):
-        """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。"""
+        """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。
+        多人有声模式逐句独立音色，禁用批量预取（音色随句变化，预取会串音色）。"""
         cached = self._cached_audio(ci, off) if self._backend in ("edge", "external") else None
         if cached:
             return self._speak_edge_play(cached, gen)
-        if self._edge_prefetch is None:
+        multi_mode = self._multi_roles is not None
+        if multi_mode:
+            # 多人有声：逐句直接合成（按 _cur_voice 独立音色）
+            try:
+                audio = self._edge_synthesize(text)
+            except Exception:
+                audio = None
+        elif self._edge_prefetch is None:
             # 首句：直接生成，同时启动后续最多 30 句的批量预取
             try:
                 audio = self._edge_synthesize(text)

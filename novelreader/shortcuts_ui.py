@@ -82,6 +82,9 @@ class ShortcutsMixin:
         # ---- 朗读控制 ----
         # Space 在阅读区触发朗读切换，并阻止输入空格
         self.text.bind("<space>", self._shortcut_tts_toggle)
+        # ← / → 跳到上一句 / 下一句（朗读中则从新句子继续）
+        self.text.bind("<Left>", lambda e: self._jump_sentence(-1))
+        self.text.bind("<Right>", lambda e: self._jump_sentence(1))
         r.bind("<Control-p>", lambda e: self._tts_toggle())
         r.bind("<Control-P>", lambda e: self._tts_toggle())
         r.bind("<Control-s>", lambda e: self._tts_stop())
