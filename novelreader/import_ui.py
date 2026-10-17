@@ -13,6 +13,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, book_loader
+from . import chapterizer  # 分章异常诊断与人工重切（2026-10-17）
 from .storage import (
     Storage,
     cache_dir,
@@ -256,6 +257,138 @@ class ImportMixin:
         tk.Button(ops, text=_T("取消"), width=8, command=dlg.destroy).pack(side="left", padx=6)
         self.root.wait_window(dlg)
         return result[0]
+    def _read_raw_text(self, path):
+        """读取 txt 原文（多编码探测，与解析引擎一致）。"""
+        with open(path, "rb") as f:
+            raw = f.read()
+        return book_loader._decode(raw)
+
+    def _fmt_anomaly(self, a):
+        """把诊断异常 dict 翻译为用户可见的原因文本。"""
+        code = a.get("code")
+        if code == "A1":
+            return _T("未能识别章节标题（{c} 个疑似标题仅识别 {h} 个），整本被切成 {n} 节").format(**a)
+        if code == "A2":
+            return _T("疑似有 {m} 个标题未被采用（识别 {h} / 候选 {c}）").format(**a)
+        if code == "A3":
+            return _T("有 {n} 个以句号/分号结尾的标题未被采用（可能是章节标题）").format(**a)
+        if code == "A4":
+            return _T("有 {n} 个较长标题（超过 40 字）未被采用").format(**a)
+        if code == "A5":
+            return _T("全书未发现任何章节标题标记（候选行为 0），按大小切成了 {n} 节").format(**a)
+        if code == "A6":
+            return _T("书很大但只有 {n} 节，章节标题可能整体未被识别").format(**a)
+        if code == "B1":
+            return _T("有 {n} 个极短章节，可能是正文被误判为标题").format(**a)
+        if code == "C1":
+            return _T("章节编号存在断号（如 {a} 后接 {b}）").format(**a)
+        return str(a)
+
+    def _ask_chapter_anomaly(self, title, diag):
+        """分章异常弹窗：让用户确认候选标题 / 手动输入标记 / 保持现状。
+
+        返回 "candidates" / "marker" / "keep" / None（None=关闭弹窗，等同保持现状）。
+        """
+        anomalies = diag.get("anomalies") or []
+        cands_n = len(diag.get("candidates") or [])
+        n = diag.get("n", 0)
+        has_cands = cands_n >= 2
+        dlg = tk.Toplevel(self.root)
+        dlg.title(_T("分章异常"))
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        self._center_window(dlg)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        result = [None]
+        tk.Label(dlg, text=_T("「{title}」的分章可能有问题").format(title=title),
+                 font=("微软雅黑", 10, "bold"), wraplength=440).pack(pady=(14, 4), padx=16)
+        reasons = "；".join(self._fmt_anomaly(a) for a in anomalies)
+        tk.Label(dlg, text=_T("当前切分为 {n} 节。\n{reasons}").format(n=n, reasons=reasons),
+                 fg="#666666", font=("微软雅黑", 9), wraplength=440, justify="left").pack(pady=(2, 6), padx=16)
+        samples = diag.get("samples") or []
+        if samples:
+            box = tk.Text(dlg, height=5, width=56, font=("微软雅黑", 9), wrap="word")
+            box.pack(padx=16, pady=(0, 6))
+            box.insert("1.0", _T("疑似章节标题样例（前 {k} 个）：\n").format(k=len(samples)) + "\n".join(samples))
+            box.configure(state="disabled")
+        ops = tk.Frame(dlg)
+        ops.pack(pady=8)
+        if has_cands:
+            tk.Button(ops, text=_T("按这些标题切分"), width=14,
+                      command=lambda: (result.__setitem__(0, "candidates"), dlg.destroy())).pack(side="left", padx=6)
+        tk.Button(ops, text=_T("手动输入标题标记"), width=15,
+                  command=lambda: (result.__setitem__(0, "marker"), dlg.destroy())).pack(side="left", padx=6)
+        tk.Button(ops, text=_T("保持现状"), width=10,
+                  command=lambda: (result.__setitem__(0, "keep"), dlg.destroy())).pack(side="left", padx=6)
+        self.root.wait_window(dlg)
+        return result[0]
+
+    def _ask_marker(self, title):
+        """手动输入章节标题关键词的输入框。返回标记字符串或 None。"""
+        dlg = tk.Toplevel(self.root)
+        dlg.title(_T("手动分章"))
+        dlg.geometry("480x200")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        self._center_window(dlg)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        result = [None]
+        tk.Label(dlg, text=_T("「{title}」的章节标题关键词是什么？").format(title=title),
+                 font=("微软雅黑", 10, "bold"), wraplength=440).pack(pady=(14, 4), padx=16)
+        tk.Label(dlg, text=_T("输入章节标题的开头关键词，例如：第X章 / 第1章 / Chapter / 卷一\nX 可代表任意数字；也可粘贴一个章节标题样例行。"),
+                 fg="#666666", font=("微软雅黑", 9), wraplength=440, justify="left").pack(pady=(2, 6), padx=16)
+        var = tk.StringVar()
+        ent = tk.Entry(dlg, textvariable=var, font=("微软雅黑", 10), width=36)
+        ent.pack(pady=(0, 8), padx=16)
+        ent.focus_set()
+
+        def on_ok():
+            result[0] = var.get().strip() or None
+            dlg.destroy()
+
+        ent.bind("<Return>", lambda e: on_ok())
+        ops = tk.Frame(dlg)
+        ops.pack(pady=6)
+        tk.Button(ops, text=_T("确定"), width=10, command=on_ok).pack(side="left", padx=6)
+        tk.Button(ops, text=_T("取消"), width=8, command=dlg.destroy).pack(side="left", padx=6)
+        self.root.wait_window(dlg)
+        return result[0]
+
+    def _apply_chapter_choice(self, content, path, diag):
+        """按用户在异常弹窗的选择重新分章（候选确认 / 手动标记）。
+
+        返回 (content, changed)；未弹窗或用户保持现状时不改动。
+        """
+        if not diag or not (diag.get("anomalies") or []):
+            return content, False
+        choice = self._ask_chapter_anomaly(content.title, diag)
+        if choice is None or choice == "keep":
+            return content, False
+        new_pairs = None
+        if choice == "candidates":
+            new_pairs = chapterizer.split_by_candidates(diag.get("text") or "")
+        elif choice == "marker":
+            marker = self._ask_marker(content.title)
+            if marker:
+                new_pairs = chapterizer.split_by_marker(diag.get("text") or "", marker)
+        if not new_pairs or len(new_pairs) < 2:
+            messagebox.showwarning(_T("分章异常"), _T("未能按所选方式重新分章，保持当前结果。"))
+            return content, False
+        # 替换分章结果并重算累计长度（进度/百分比依赖 cum/total_chars）
+        content.chapters = [book_loader.Chapter(t, book_loader.normalize_body(b)) for t, b in new_pairs]
+        content.cum = [0]
+        for c in content.chapters:
+            content.cum.append(content.cum[-1] + len(c.content))
+        content.total_chars = content.cum[-1]
+        self._flash_status(_T("已按你的选择重新分章：{n} 章").format(n=len(content.chapters)))
+        return content, True
+
     def _reprocess_book(self, path, bid):
         """重新预处理：后台线程强制重新解析分章，带进度窗，避免百万字假死。"""
         win = tk.Toplevel(self.root)
@@ -277,9 +410,14 @@ class ImportMixin:
         def worker():
             try:
                 content = book_loader.parse_book(path)  # 强制重新解析
-                self.storage.write_cache(bid, content)
-                self._cache[bid] = content
-                done.put(("ok", content))
+                diag = None
+                # 仅纯文本格式可做分章诊断（epub/pdf/chm 章节来自文件结构，不适用）
+                if content.format in ("txt",):
+                    try:
+                        diag = chapterizer.diagnose(_read_raw_text(path), chapters=content.chapters)
+                    except Exception:
+                        diag = None
+                done.put(("ok", content, diag))
             except Exception as e:
                 done.put(("err", str(e)))
 
@@ -294,7 +432,9 @@ class ImportMixin:
             bar.stop()
             win.destroy()
             if msg[0] == "ok":
-                content = msg[1]
+                content, diag = msg[1], msg[2]
+                # 分章异常 → 弹窗让用户选择（候选确认 / 手动标记 / 保持现状）
+                content, _changed = self._apply_chapter_choice(content, path, diag)
                 self._save_import(content, path)
                 self._refresh_bookshelf()
                 self.open_book(bid)
@@ -375,8 +515,14 @@ class ImportMixin:
                 try:
                     bid = self.storage.book_id(p)
                     content = self._load_book(p, force_reparse=(bid in force_reparse))
+                    diag = None
+                    if content and content.format in ("txt",):
+                        try:
+                            diag = chapterizer.diagnose(_read_raw_text(p), chapters=content.chapters)
+                        except Exception:
+                            diag = None
                     bid = self._save_import(content, p)
-                    done.put(("ok", bid, os.path.basename(p)))
+                    done.put(("ok", bid, os.path.basename(p), diag))
                 except Exception as e:
                     done.put(("err", os.path.basename(p), str(e)))
             done.put(("done",))
@@ -384,6 +530,7 @@ class ImportMixin:
         threading.Thread(target=worker, daemon=True).start()
         self._import_win = win
         self._import_queue = done
+        self._import_anomalies = []
         self._poll_import(win, prog_var, info_lbl, name_lbl, total)
     def _ask_duplicate_batch(self, count):
         """批量导入中重复书籍的确认框。返回 None=取消 / "overwrite" / "reparse"。"""
@@ -423,16 +570,44 @@ class ImportMixin:
                     # 打开第一本成功导入的书
                     if getattr(self, "_first_imported_bid", None):
                         self.open_book(self._first_imported_bid)
+                    self._after_import_check(total)
                     return
                 if msg[0] == "ok":
+                    _bid, _name, _diag = msg[1], msg[2], msg[3]
                     if getattr(self, "_first_imported_bid", None) is None:
                         self._first_imported_bid = msg[1]
+                    if _diag and (_diag.get("anomalies") or []):
+                        anoms = getattr(self, "_import_anomalies", [])
+                        anoms.append((msg[1], msg[2]))
+                        self._import_anomalies = anoms
                 prog_var.set(prog_var.get() + 1)
                 info_lbl.configure(text=f"{int(prog_var.get())} / {total}")
-                name_lbl.configure(text=msg[1] if msg[0] == "ok" else _T("失败：{a}：{b}").format(a=msg[1], b=msg[2]))
+                name_lbl.configure(text=msg[2] if msg[0] == "ok" else _T("失败：{a}：{b}").format(a=msg[1], b=msg[2]))
         except queue.Empty:
             pass
         self.root.after(80, lambda: self._poll_import(win, prog_var, info_lbl, name_lbl, total))
+
+    def _after_import_check(self, total):
+        """导入完成后处理分章异常的书：单本直接弹窗；多本汇总提示，用户可选逐本处理。"""
+        anoms = getattr(self, "_import_anomalies", [])
+        self._import_anomalies = []
+        if not anoms:
+            return
+        if total == 1:
+            bid, _name = anoms[0]
+            meta = self.storage.get_book(bid)
+            if meta and meta.get("path"):
+                self._reprocess_book(meta["path"], bid)
+            return
+        names = "\n".join(f"  · {nm}" for _b, nm in anoms)
+        if messagebox.askyesno(
+                _T("分章异常"),
+                _T("{n} 本书分章可能异常：\n{names}\n\n是否逐本处理？").format(n=len(anoms), names=names)):
+            for bid, _name in anoms:
+                meta = self.storage.get_book(bid)
+                if meta and meta.get("path"):
+                    self._reprocess_book(meta["path"], bid)
+                    break
     def _remove_book(self, clear_cache=False):
         bid = self._selected_bid()
         if not bid:

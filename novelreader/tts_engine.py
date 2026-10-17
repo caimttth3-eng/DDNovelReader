@@ -430,12 +430,15 @@ class _EdgePrefetch:
 
     生产线程从 start_off 起按句子顺序合成，放入有界队列（上限 MAX_AHEAD）。
     队列满则生产者阻塞，天然把预取量限制在 MAX_AHEAD 内，避免过量占用网络与内存。
+    当前章节句子取完后自动跨到下一章继续预取——保证「跨章第一句」也有缓存，不卡顿。
     """
 
     MAX_AHEAD = 30
 
-    def __init__(self, synth_fn, content, start_off, limit=MAX_AHEAD):
+    def __init__(self, synth_fn, chapters, ci, content, start_off, limit=MAX_AHEAD):
         self._synth = synth_fn
+        self._chapters = chapters
+        self._ci = ci
         self._content = content
         self._limit = limit
         self._queue = queue.Queue(maxsize=limit)
@@ -446,14 +449,20 @@ class _EdgePrefetch:
 
     def _run(self):
         try:
+            ci = self._ci
+            content = self._content
+            off = self._next_off
             while not self._stopped.is_set():
-                with self._lock:
-                    off = self._next_off
-                text, nxt, _ = SpeechController._next_chunk(self._content, off)
+                text, nxt, _ = SpeechController._next_chunk(content, off)
                 if not text or nxt <= off:
+                    # 当前章节取完 → 跨到下一章继续预取（下一章开头不再现场合成）
+                    if ci + 1 < len(self._chapters):
+                        ci += 1
+                        content, _cmap = self._chapters[ci].tts_content()
+                        off = 0
+                        continue
                     break
-                with self._lock:
-                    self._next_off = nxt
+                off = nxt
                 try:
                     audio = self._synth(text)
                 except Exception:
@@ -1710,7 +1719,7 @@ class SpeechController:
                     }
                 )
                 if self._backend in ("edge", "external"):
-                    ok = self._speak_edge(text, gen, ci, orig_off, clean_text, next_clean)
+                    ok = self._speak_edge(text, gen, ci, orig_off, clean_text, next_clean, chapters)
                 else:
                     ok = self._speak_sapi(text, gen)
                 if not ok:
@@ -1802,7 +1811,7 @@ class SpeechController:
             return audio
         return synth_audio(text, voice, rate)
 
-    def _speak_edge(self, text, gen, ci, off, content, next_off):
+    def _speak_edge(self, text, gen, ci, off, content, next_off, chapters):
         """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。
         多人有声模式逐句独立音色，禁用批量预取（音色随句变化，预取会串音色）。"""
         cached = self._cached_audio(ci, off) if self._backend in ("edge", "external") else None
@@ -1822,7 +1831,7 @@ class SpeechController:
             except Exception:
                 audio = None
             self._edge_prefetch = _EdgePrefetch(
-                self._edge_synthesize, content, next_off, _EdgePrefetch.MAX_AHEAD
+                self._edge_synthesize, chapters, ci, content, next_off, _EdgePrefetch.MAX_AHEAD
             )
         else:
             audio = None
@@ -1847,7 +1856,7 @@ class SpeechController:
                 except Exception:
                     pass
                 self._edge_prefetch = _EdgePrefetch(
-                    self._edge_synthesize, content, next_off, _EdgePrefetch.MAX_AHEAD
+                    self._edge_synthesize, chapters, ci, content, next_off, _EdgePrefetch.MAX_AHEAD
                 )
         if audio:
             return self._speak_edge_play(audio, gen)

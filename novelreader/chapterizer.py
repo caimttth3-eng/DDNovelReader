@@ -6,20 +6,21 @@ _NUM = r"[0-9０-９零〇○一二三四五六七八九十百千万两]+"
 _UNIT = r"[章节回卷部集篇]"
 
 # 严格匹配：行首就是第N章 / Chapter N / 楔子等
+# 第N章 后允许：标点/空白 + 标题，或【无分隔直接接标题】（如"第一章被校花撞了"，标题限 40 字防误判）
 _HEAD_LINE = re.compile(
     r"^\s{0,4}(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
     r")\s*$"
 )
 
 # 宽松匹配：行尾是第N章（可能带书名前缀），用于匹配"书名 第1章"格式
 _TAIL_CHAPTER = re.compile(
     r"(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|\s*)?"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
     r")\s*$"
 )
 
@@ -114,7 +115,7 @@ def _detect_heads(lines):
     seen = set()
 
     for i, raw in enumerate(lines):
-        line = raw.strip(" \t\u3000")
+        line = raw.strip(" \t\u3000\r\n")
         if not line or len(line) > 200:
             continue
         if i in seen:
@@ -272,11 +273,36 @@ def _split_by_inner(text, heads):
     return chapters
 
 
+def _detect_num_heads(lines):
+    """检测'数字.标题'格式的标题行（trxs.cc 等站点：1.标题 / 卷名：1.标题）。
+
+    仅用于主分章的兜底重切与候选池（严格条件：长度 6-45、排除正文噪音），
+    不进入常规 _detect_heads，避免切坏"第X章"正常书。
+    """
+    heads = []
+    for i, raw in enumerate(lines):
+        line = raw.strip(" \t\u3000\r\n")
+        if not line or not (6 <= len(line) <= 45):
+            continue
+        low = line.lower()
+        if any(m in low for m in _NON_TITLE_MARKERS):
+            continue
+        if any(m in low for m in ("点赞", "评论", "转发", "播放", "弹幕")):
+            continue
+        if re.match(r"^\d{1,4}[.．]\S", line):
+            heads.append((i, line))
+        elif re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", line):
+            heads.append((i, line))
+    return heads
+
+
 def split_chapters(text):
     """尝试按章节标题切分。成功返回 [(title, content), ...]；无法可靠切分返回 None。
 
     优先识别正文中穿插的"第X章 章节名"内层标题（编号连续时按它切分），
     否则回退到行首标题（书名 第N章 / 严格第N章 / 分隔线）。
+    若按常规标题切出的章节极少（<=15）但存在大量"数字.标题"（trxs.cc 等站点格式），
+    改用数字标题重切——避免整本漏切，同时不干扰正常"第X章"书。
     """
     lines = text.split("\n")
 
@@ -288,11 +314,32 @@ def split_chapters(text):
             return chapters
 
     heads = _detect_heads(lines)
+    chapters = _chapters_from_heads(lines, heads)
 
-    # 至少 2 个标题才认为是已带章节的文本，避免误切
-    if len(heads) < 2:
+    # 常规标题切不出可靠章节或切出的章节极少，但有大量候选标题 → 按候选重切
+    # （trxs.cc"数字.标题"、书名前缀+第N章等格式兜底；正常"第X章"书章节多，不受影响）
+    # 候选数量须与书大小匹配：太少（<约2万字1个）→ 正文调侃行；太多（<约800字1个）→ 正文短行混入
+    if not chapters or len(chapters) <= 15:
+        cands = collect_candidates(lines)
+        min_cands = max(20, len(text) // 20000)
+        max_cands = len(text) // 800
+        if min_cands <= len(cands) <= max_cands and len(cands) > len(heads) * 1.5:
+            num_chapters = _chapters_from_heads(lines, cands)
+            if num_chapters and len(num_chapters) >= 2:
+                chapters = num_chapters
+
+    if len(chapters) < 2:
+        # 标题集中在文首（如目录），正文没被切到 → 不可靠
         return None
+    # 给没有换行的正文按句子加上换行（如空格分段的文本）
+    chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
+    return chapters
 
+
+def _chapters_from_heads(lines, heads):
+    """由标题行索引列表构建 [(title, body), ...]；标题不足时返回空列表。"""
+    if len(heads) < 2:
+        return []
     chapters = []
     # 第一章标题之前的文字（书名/简介/前言等）归入"简介"章，排在第一章之前
     intro = "\n".join(lines[:heads[0][0]]).strip(" \t\u3000\n")
@@ -309,12 +356,6 @@ def split_chapters(text):
         title, body = _absorb_inline_title(title, body)
         if body.strip():
             chapters.append((title, body))
-
-    if len(chapters) < 2:
-        # 标题集中在文首（如目录），正文没被切到 → 不可靠
-        return None
-    # 给没有换行的正文按句子加上换行（如空格分段的文本）
-    chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
     return chapters
 
 
@@ -355,3 +396,216 @@ def fallback_split(text, para_target=5000):
     if not chapters:
         return [("正文", (text or "").strip())]
     return chapters
+
+
+# ---------------- 分章异常诊断与人工重切（2026-10-17 新增） ----------------
+
+_CAND_KW = ("楔子", "序章", "序言", "前言", "引子", "引言", "尾声", "后记", "番外", "终章", "大结局", "完结篇")
+
+
+def collect_candidates(lines, max_len=60):
+    """粗筛'疑似章节标题'行：行首以章节关键词开头、长度<=max_len、排除明显非标题行。
+
+    返回 [(行号, 原文行), ...]。这是"自动识别+异常人工选择"的候选池：
+    分章器严格/宽松规则认不出的格式（如无分隔直连标题）在这里仍能被粗筛出来。
+    """
+    cands = []
+    for i, raw in enumerate(lines):
+        line = raw.strip(" \t\u3000\r\n")
+        if not line or len(line) > max_len:
+            continue
+        low = line.lower()
+        if any(m in low for m in _NON_TITLE_MARKERS):
+            continue
+        # 正文噪音（社交数据/弹幕等），仅候选池过滤，不影响严格识别
+        if any(m in low for m in ("点赞", "评论", "转发", "播放", "弹幕")):
+            continue
+        if re.match(rf"第{_NUM}{_UNIT}", line):
+            cands.append((i, line))
+        elif re.match(r"(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+", line):
+            cands.append((i, line))
+        elif any(line.startswith(k) for k in _CAND_KW):
+            cands.append((i, line))
+        # 数字编号标题：1.标题 / 012．标题（trxs.cc 等站点常见；仅认点号，顿号多为条款/列表；
+        # 长度下限 6 过滤"2.安诗鱼"式正文人名小标题）
+        elif 6 <= len(line) <= 45 and re.match(r"^\d{1,4}[.．]\S", line):
+            cands.append((i, line))
+        # 卷名：数字.标题（如「乐子人在蓝星：1.签下合约吧」）；排除【〔［ 开头（时间戳/标注）
+        elif 6 <= len(line) <= 45 and re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", line):
+            cands.append((i, line))
+        elif len(line) <= 60 and not line.startswith(("“", "「", "『", "【", "〔", "［", "（")):
+            # 行内含章节标记（非行首）：分两类精确识别——
+            # ① 书名前缀 + 第N章（如「东京软饭王 第1章」：第N章必须在行尾）
+            # ② 卷名 + 终章/尾声等（如「乐子人在危险的新蓝星：终章  吹响第六的号角」）
+            # 排除正文误抓：正文叙述"物质魔典第一章将魔力……"（章标记在行中）、
+            # 对话"第二回合！！！"、口语"第一节课"、正文"进入了尾声"
+            _tm = re.search(
+                rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)$", line)
+            if _tm and "回合" not in line and "节课" not in line:
+                cands.append((i, _extract_title(line)))
+            elif re.match(rf"^[^\s【〔［“「『].{{1,15}}[：:]\s*(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)", line):
+                cands.append((i, line))
+    return cands
+
+
+def diagnose(text, chapters=None):
+    """分章异常诊断：基于当前分章结果 + 候选标题粗筛，判定异常类型。
+
+    chapters 可传入已切好的章节列表（Chapter 对象或 (title, body) 对），
+    未传则内部重新切分。返回 dict：
+      {text, total_chars, heads, candidates, n, samples, missed, anomalies}
+    anomalies 为 [{"code": "A1", **参数}, ...]，文案由 GUI 层按 i18n 渲染。
+    """
+    lines = text.split("\n")
+    total = len(text)
+    if chapters is None:
+        spl = split_chapters(text)
+        chapters = spl if spl else fallback_split(text)
+    n = len(chapters)
+
+    heads = _detect_heads(lines)
+    cands = collect_candidates(lines)
+    head_idx = {i for i, _t in heads}
+    missed = [(i, t) for i, t in cands if i not in head_idx]
+
+    anomalies = []
+    notes = []
+
+    # A5 全书无任何章节标记（候选行为 0 且书足够大）
+    if not cands and total > 200000:
+        anomalies.append({"code": "A5", "n": n})
+
+    # A1 识别失败 / A2 部分漏切（若当前章节数与候选数接近，说明已按候选切好，不再打扰）
+    if len(cands) >= 10 and n < len(cands) * 0.9:
+        if len(heads) < 5 or len(heads) / len(cands) < 0.8:
+            if n <= 5:
+                anomalies.append({"code": "A1", "n": n, "c": len(cands), "h": len(heads)})
+            else:
+                anomalies.append({"code": "A2", "m": len(missed), "h": len(heads), "c": len(cands)})
+
+    # A3 句号/分号结尾的标题漏切（防正文误判的取舍；少于 3 个视为正文句混入候选，不打扰）
+    tail_missed = [t for _i, t in missed if t.rstrip(" \t\u3000")[-1:] in "。；;"]
+    if len(tail_missed) >= 3:
+        notes.append({"code": "A3", "n": len(tail_missed)})
+
+    # A4 超长标题漏切（40 < 长度 <= 60）
+    long_missed = [t for _i, t in missed if len(t) > 40]
+    if long_missed:
+        notes.append({"code": "A4", "n": len(long_missed)})
+
+    # A6 章节数过少：书很大却只有极少数节 → 章节级标题整体漏切（如"数字.标题"格式）
+    if total >= 600000 and n <= 15:
+        anomalies.append({"code": "A6", "n": n})
+
+    # B1 极短章节过多：正文被误判为标题（支持 Chapter 对象或 (title, body) 元组）
+    def _ch_len(c):
+        try:
+            return len(c.content)
+        except AttributeError:
+            return len(c[1])
+
+    def _ch_title(c):
+        try:
+            return c.title
+        except AttributeError:
+            return c[0]
+
+    short = [_ch_title(c) for c in chapters if _ch_len(c) < 150]
+    if n >= 10 and len(short) > 3:
+        notes.append({"code": "B1", "n": len(short)})
+
+    # C1 编号断号/跳号（仅当识别的标题足够多；断号常见于正常书，仅作非阻塞提示）
+    nums = []
+    for _i, t in heads:
+        m = re.match(rf"第({_NUM})章", t)
+        if m:
+            seg = re.sub(r"[０-９]", lambda x: str("０１２３４５６７８９".index(x.group(0))), m.group(1))
+            if seg.isdigit():
+                nums.append(int(seg))
+    if len(nums) >= 5:
+        for k in range(1, len(nums)):
+            if nums[k] > nums[k - 1] + 1:
+                notes.append({"code": "C1", "a": nums[k - 1], "b": nums[k]})
+                break
+
+    return {
+        "text": text,
+        "total_chars": total,
+        "heads": heads,
+        "candidates": cands,
+        "n": n,
+        "samples": [t for _i, t in cands[:5]],
+        "missed": missed,
+        "anomalies": anomalies,
+        "notes": notes,
+    }
+
+
+def split_by_candidates(text):
+    """用户确认候选标题后：按全部候选标题行强制切分（不受严格/宽松规则限制）。"""
+    lines = text.split("\n")
+    cands = collect_candidates(lines)
+    if len(cands) < 2:
+        return None
+    chapters = []
+    intro = "\n".join(lines[:cands[0][0]]).strip(" \t\u3000\n")
+    if intro:
+        chapters.append(("简介", intro))
+    for k, (idx, title) in enumerate(cands):
+        start = idx + 1
+        if start < len(lines) and _SEP_LINE.match(lines[start].strip(" \t\u3000")):
+            start += 1
+        end = cands[k + 1][0] if k + 1 < len(cands) else len(lines)
+        body = "\n".join(lines[start:end]).strip("\n")
+        title, body = _absorb_inline_title(title, body)
+        if body.strip():
+            chapters.append((title, body))
+    chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
+    return chapters if len(chapters) >= 2 else None
+
+
+def _marker_to_regex(marker):
+    """把用户输入的标记转成正则。
+
+    '第X章' / '第1章' → 匹配任意数字的'第N章'；'Chapter' → 匹配 Chapter N；
+    其他关键词 → 行首包含该关键词（长度<=60）。
+    """
+    m = marker.strip()
+    if not m:
+        return None
+    mm = re.match(r"^第([0-9０-９零〇一二三四五六七八九十百千万两xX]+)([章节回卷部集篇])$", m)
+    if mm:
+        return re.compile(r"^第" + _NUM + re.escape(mm.group(2)))
+    if re.match(r"^(?:chapter|CHAPTER)\s*([0-9xXIVLCivxl]*)$", m):
+        return re.compile(r"(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+")
+    return re.compile(r"^" + re.escape(m))
+
+
+def split_by_marker(text, marker):
+    """按用户输入的章节标题关键词切分（手动标记方案）。"""
+    pat = _marker_to_regex(marker)
+    if pat is None:
+        return None
+    lines = text.split("\n")
+    idxs = []
+    for i, raw in enumerate(lines):
+        line = raw.strip(" \t\u3000\r\n")
+        if line and len(line) <= 60 and pat.match(line):
+            idxs.append((i, line))
+    if len(idxs) < 2:
+        return None
+    chapters = []
+    intro = "\n".join(lines[:idxs[0][0]]).strip(" \t\u3000\n")
+    if intro:
+        chapters.append(("简介", intro))
+    for k, (idx, title) in enumerate(idxs):
+        start = idx + 1
+        if start < len(lines) and _SEP_LINE.match(lines[start].strip(" \t\u3000")):
+            start += 1
+        end = idxs[k + 1][0] if k + 1 < len(idxs) else len(lines)
+        body = "\n".join(lines[start:end]).strip("\n")
+        title, body = _absorb_inline_title(title, body)
+        if body.strip():
+            chapters.append((title, body))
+    chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
+    return chapters if len(chapters) >= 2 else None
