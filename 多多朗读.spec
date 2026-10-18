@@ -139,9 +139,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='多多朗读',
     debug=False,
     bootloader_ignore_signals=False,
@@ -156,4 +155,17 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['assets/app.ico'],
+)
+
+# onedir 模式（方案 B，2026-10-18）：运行库固定放在 exe 旁 _internal 目录，
+# 启动时不再每次解压到 Temp/_MEIxxx，二次启动秒开，根治低配/机械硬盘用户「打开就卡」。
+# 交付物为文件夹：dist\多多朗读\（多多朗读.exe + _internal\）。
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='多多朗读',
 )
