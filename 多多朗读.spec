@@ -115,8 +115,10 @@ _hiddenimports = [
 ]
 
 # --- excludes：排除用不到的标准库/测试模块，进一步瘦身 ---
+# 注意：不能排除 pygame——_trim_edge_silence 用 pygame 解码 mp3 裁剪句首尾静音
+#（2026-10-19 起 Windows 版也依赖，句间停顿修复）
 _excludes = [
-    'pygame', 'unittest', 'pydoc', 'doctest', 'idlelib', 'lib2to3',
+    'unittest', 'pydoc', 'doctest', 'idlelib', 'lib2to3',
     'sqlite3', 'ensurepip', 'venv', 'wsgiref', 'xmlrpc',
     'tkinter.test', 'ctypes.test', 'test',
 ]

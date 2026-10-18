@@ -1552,27 +1552,35 @@ class SpeechController:
 
     @staticmethod
     def list_voices():
-        """在临时线程中枚举系统语音，避免与工作线程的 COM 对象冲突。"""
-        out = []
+        """在临时线程中枚举系统语音，避免与工作线程的 COM 对象冲突。
 
-        def work():
-            try:
-                if pyttsx3 is None:
-                    return
-                e = pyttsx3.init()
+        COM/SAPI 枚举偶发失败（曾复现返回空导致"本地语音列表消失"），
+        因此失败时自动重试 3 次，每次间隔 200ms，最大限度保证拿到系统语音。
+        """
+        for _attempt in range(3):
+            out = []
+
+            def work():
                 try:
-                    out.extend(v.id for v in e.getProperty("voices"))
-                finally:
+                    if pyttsx3 is None:
+                        return
+                    e = pyttsx3.init()
                     try:
-                        e.stop()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        out.extend(v.id for v in e.getProperty("voices"))
+                    finally:
+                        try:
+                            e.stop()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-        t = threading.Thread(target=work, daemon=True)
-        t.start()
-        t.join(timeout=10)
+            t = threading.Thread(target=work, daemon=True)
+            t.start()
+            t.join(timeout=10)
+            if out:
+                return out
+            time.sleep(0.2)
         return out
 
     # ---------- 控制（GUI 线程调用） ----------
@@ -1877,6 +1885,7 @@ class SpeechController:
         """用平台播放器播放预生成的 MP3（Windows=MCI，macOS/Linux=pygame），支持暂停/停止。"""
         if not audio:
             return False
+        audio = _trim_edge_silence(audio)  # 裁句首尾静音（停顿=0 时句间接近无缝）
         tmp_path = None
         try:
             suffix = ".wav" if audio[:4] == b"RIFF" else ".mp3"
@@ -1917,6 +1926,70 @@ class SpeechController:
                     os.unlink(tmp_path)
                 except Exception:
                     pass
+
+
+def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
+    """裁剪 edge_tts 音频首尾静音（2026-10-19 新增）。
+
+    实测 edge_tts 每句音频自带 ~550ms 句尾静音 + ~190ms 句头静音（合成器固有），
+    即使用户把句间停顿设为 0，句间感知停顿仍约 0.7s。本函数在播放前把首尾静音
+    裁掉（保留少量自然尾音），实现"停顿=0"时接近无缝朗读。
+    - 输入 mp3/wav bytes → pygame 解码 → 静音检测 → 重写为 wav bytes；
+    - 失败 / 无 pygame / 裁剪后过短时原样返回，不影响播放；
+    - 每次 init 后保持 mixer 状态，兼容 macOS/Linux pygame 播放器懒加载。
+    """
+    if not audio or audio[:4] == b"RIFF":  # wav 无需处理（external 引擎输出）
+        return audio
+    try:
+        import array
+        import wave
+        import pygame
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(frequency=24000, channels=2, size=-16)
+        freq, _size, channels = pygame.mixer.get_init()[:3]
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        try:
+            tmp.write(audio)
+            tmp.flush()
+            tmp.close()
+            snd = pygame.mixer.Sound(tmp.name)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+        raw = snd.get_raw()
+        if not raw or len(raw) < 64:
+            return audio
+        samples = array.array("h", raw)
+        n = len(samples)
+        peak = max(abs(x) for x in samples) or 1
+        th = max(peak * threshold, 1)
+        # 尾部：从后往前找最后一个超过阈值的样本
+        i = n - 1
+        while i >= 0 and abs(samples[i]) < th:
+            i -= 1
+        tail_keep = int(keep_tail_ms / 1000.0 * freq)
+        tail_end = min(n - 1, i + tail_keep)
+        # 头部：从前往后找第一个超过阈值的样本
+        j = 0
+        while j < n and abs(samples[j]) < th:
+            j += 1
+        head_keep = int(keep_head_ms / 1000.0 * freq)
+        head_start = max(0, j - head_keep)
+        if tail_end - head_start < int(0.05 * freq):  # 裁剪后过短，放弃
+            return audio
+        trimmed = samples[head_start:tail_end + 1]
+        import io as _io
+        buf = _io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(channels)
+            w.setsampwidth(2)
+            w.setframerate(freq)
+            w.writeframes(trimmed.tobytes())
+        return buf.getvalue()
+    except Exception:
+        return audio
 
 
 # ---------- Windows MCI 播放器（winmm.dll，替代 pygame，零依赖） ----------

@@ -77,24 +77,24 @@ def _enable_dpi_awareness():
         pass
 
 
-def _cleanup_stale_mei_dirs(max_age=86400):
-    """清理 PyInstaller onefile 解压残留（_MEI* 目录）。
+def _cleanup_stale_mei_dirs():
+    """清理 PyInstaller onefile 解压残留（_MEI* 目录），每次启动全量清理。
 
     单文件 exe 每次启动会把运行库解压到系统临时目录（_MEI 随机后缀）再运行；
-    正常退出会自动删除，但强杀 / 崩溃 / 断电会残留。本函数在每次启动时静默清理
-    超过 max_age 秒的旧残留，防止临时目录只增不减占用磁盘（方案 A，2026-10-15）。
+    正常退出会自动删除，但强杀 / 崩溃 / 断电会残留。本函数在每次启动时静默删除
+    **除当前进程自身解压目录外的所有 _MEI 残留**（不再按天过滤），保证任何用户
+    都不会看到临时目录只增不减（公开软件兜底，2026-10-18 强化，原版仅删超 1 天）。
     - 当前进程自己的解压目录（sys._MEIPASS）不删；
     - 正在被占用的目录（其他实例 / 其他软件仍在用）删除失败自动跳过；
+    - 单实例机制（SingleInstance）保证不会误删正在运行的另一个多多朗读；
     - 三平台通用（tempfile.gettempdir() 自动定位系统临时目录）；
     - 纯后台逻辑，无 UI 文案，不影响启动速度。
     """
     try:
         import shutil
         import tempfile
-        import time
         tmp = tempfile.gettempdir()
         cur = getattr(sys, "_MEIPASS", "") or ""
-        now = time.time()
         try:
             names = os.listdir(tmp)
         except Exception:
@@ -108,8 +108,7 @@ def _cleanup_stale_mei_dirs(max_age=86400):
                     continue
                 if cur and os.path.abspath(p) == os.path.abspath(cur):
                     continue  # 当前进程自己的解压目录
-                if now - os.stat(p).st_mtime > max_age:
-                    shutil.rmtree(p, ignore_errors=True)
+                shutil.rmtree(p, ignore_errors=True)
             except Exception:
                 pass  # 占用 / 权限问题一律跳过，不影响启动
     except Exception:
