@@ -162,6 +162,32 @@ class TtsMixin:
         self.tts.stop()
         self._set_tts_ui("stopped")
         self._clear_highlight()
+        lyr = getattr(self, "_lyric", None)
+        if lyr is not None:
+            try:
+                lyr.clear()
+            except Exception:
+                pass
+    def _toggle_lyric(self):
+        """桌面模式（歌词式悬浮窗）开关：开 = 显示当前朗读句的置顶悬浮窗，关 = 关闭。"""
+        lyr = getattr(self, "_lyric", None)
+        try:
+            alive = lyr is not None and lyr.win.winfo_exists()
+        except Exception:
+            alive = False
+        if alive:
+            try:
+                lyr.close()
+            except Exception:
+                pass
+            self._lyric = None
+            self.tts_lyric_btn.configure(text=_T("桌面模式"))
+            self._flash_status(_T("桌面歌词已关闭"))
+            return
+        from lyric_ui import LyricWindow
+        self._lyric = LyricWindow(self.root, self)
+        self.tts_lyric_btn.configure(text=_T("桌面模式"))
+        self._flash_status(_T("桌面歌词已开启，可拖动 / 缩放 / 锁定"))
     def _flash_status(self, msg):
         if self._status_timer:
             self.root.after_cancel(self._status_timer)

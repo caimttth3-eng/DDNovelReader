@@ -749,6 +749,8 @@ class NovelReaderBase:
         self.tts_toggle_btn.pack(side="left")
         self.tts_stop_btn = ttk.Button(row3, text=_T("⏹ 结束"), command=self._tts_stop, state="disabled")
         self.tts_stop_btn.pack(side="left", padx=4)
+        self.tts_lyric_btn = ttk.Button(row3, text=_T("桌面模式"), command=self._toggle_lyric)
+        self.tts_lyric_btn.pack(side="left", padx=(0, 4))
         self.tts_status_label = tk.Label(row3, text="", fg="#c0392b")
         self.tts_status_label.pack(side="left", padx=(6, 0))
         self._status_timer = None

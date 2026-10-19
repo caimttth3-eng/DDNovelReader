@@ -140,6 +140,33 @@ class BookmarkMixin:
         except Exception:
             pass
 
+    # ---------- 桌面歌词窗：按当前句直接收藏（不依赖选区） ----------
+    def _add_bookmark_text(self, text):
+        """把当前朗读句直接存为书签（歌词悬浮窗调用）。不弹窗，默认备注取句子前 30 字。"""
+        if not self.book or not self.current_bid:
+            return
+        text = (text or "").strip()
+        if not text:
+            return
+        off = getattr(self, "char_offset", 0)
+        ci = getattr(self, "chapter_idx", self.chapter_idx)
+        content = self.book.chapters[ci].content
+        off = max(0, min(off, len(content)))
+        note = (text[:30] + "…") if len(text) > 30 else text
+        bm = {
+            "chapter_idx": ci,
+            "offset": off,
+            "offset_end": min(len(content), off + len(text)),
+            "text": text,
+            "note": note,
+        }
+        self.storage.add_bookmark(self.current_bid, bm)
+        try:
+            self._apply_bookmark_tags()
+            self._fill_bookmark_panel(keep=True)
+        except Exception:
+            pass
+
     # ---------- 目录 / 书签 面板切换 ----------
     def _set_panel_mode(self, mode):
         """切换目录面板内容：'toc' 章节列表 / 'bookmark' 书签列表。"""

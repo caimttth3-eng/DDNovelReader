@@ -461,6 +461,13 @@ class ReaderMixin:
                 self.char_offset = off
                 self._render_chapter()
             self._highlight_sentence(ci, off, text)
+            lyr = getattr(self, "_lyric", None)
+            if lyr is not None:
+                try:
+                    title = self.book.chapters[ci].title if self.book else ""
+                    lyr.show_sentence(title, text)
+                except Exception:
+                    pass
         elif t == "sentence_done":
             ci, off = evt["chapter_idx"], evt["char_offset"]
             self.chapter_idx = ci
@@ -470,6 +477,12 @@ class ReaderMixin:
         elif t == "finished":
             self._set_tts_ui("stopped")
             self._clear_highlight()
+            lyr = getattr(self, "_lyric", None)
+            if lyr is not None:
+                try:
+                    lyr.clear()
+                except Exception:
+                    pass
             if self.book:
                 self.char_offset = len(self.book.chapters[self.chapter_idx].content)
                 self._update_status()
@@ -478,6 +491,12 @@ class ReaderMixin:
             if not self.tts.is_active():
                 self._set_tts_ui("stopped")
                 self._clear_highlight()
+                lyr = getattr(self, "_lyric", None)
+                if lyr is not None:
+                    try:
+                        lyr.clear()
+                    except Exception:
+                        pass
         elif t == "error":
             # 非阻塞提示。注意：Edge 联网失败会回退本地语音并继续朗读，
             # 此时不能把按钮重置为“开始朗读”，真正的结束由 “stopped” 事件统一处理。

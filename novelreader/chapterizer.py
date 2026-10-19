@@ -7,20 +7,21 @@ _UNIT = r"[章节回卷部集篇]"
 
 # 严格匹配：行首就是第N章 / Chapter N / 楔子等
 # 第N章 后允许：标点/空白 + 标题，或【无分隔直接接标题】（如"第一章被校花撞了"，标题限 40 字防误判）
+# 直连标题允许句号/问号/感叹号结尾（如"第59章凯尔希哈气／魏彦吾肾虚。"），仅排除空白/顿号/逗号/分号
 _HEAD_LINE = re.compile(
     r"^\s{0,4}(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s、；;]{{1,40}}|\s*)"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s、；;]{{1,40}}|\s*)"
     r")\s*$"
 )
 
 # 宽松匹配：行尾是第N章（可能带书名前缀），用于匹配"书名 第1章"格式
 _TAIL_CHAPTER = re.compile(
     r"(?:"
-    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
+    rf"第{_NUM}{_UNIT}(?:\s*[：:、.\-—].*|\s+.*|[^\s、；;]{{1,40}}|\s*)"
     r"|(?:[Cc]hapter|CHAPTER)\s+[0-9IVXLCivxl]+[：:.\s]?.*"
-    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s。、；;]{{1,40}}|\s*)"
+    r"|(?:楔子|序章|序言|前言|引子|引言|尾声|后记|番外|终章|大结局|完结篇)(?:\s*[：:、.\-—].*|\s+.*|[^\s、；;]{{1,40}}|\s*)"
     r")\s*$"
 )
 
@@ -273,8 +274,55 @@ def _split_by_inner(text, heads):
     return chapters
 
 
+# 数字标题分隔符家族（2026-10-19 书库训练新增）：
+#   ① 数字+点号    1.标题 / 012．标题（原有）
+#   ② 数字+冒号    0001：接手烂摊子
+#   ③ 数字+顿号    1、菈菈！（求收藏推荐！）
+#   ④ 数字直连汉字 0001努力到了快30岁 / 1穿越,新的世界.（无分隔直接接标题，限 20 字短行）
+#   ⑤ 中文数字+顿号 一、厄里斯女神的迎接
+# 正文噪音防护：数字直连时排除 量词/单位/等级词/年份/日期 开头
+# （30岁/12月25日/2024年/10点/第3天/1楼/2阶装备/3转斗帝/3000以内……）
+_NUM_DIRECT_BAD = "年月日点分秒岁时块万元角楼层位名个次级倍‰％初末旬阶转品星境重线环层辰以费"
+_NUM_HEAD_CN = "[\u4e00-\u9fff]"
+
+
+def _num_head_match(line):
+    """True 若 line 是数字编号标题行（5 种分隔格式之一，6-45 字）。"""
+    if not (6 <= len(line) <= 45):
+        return False
+    # ① 数字+点号（含全角点）
+    if re.match(r"^\d{1,4}[.．]\S", line):
+        return True
+    # ② 数字+冒号：0001：接手烂摊子（排除 12:30 时间——冒号后必须接汉字；条款/规则长句限 30 字）
+    if len(line) <= 30 and re.match(r"^\d{1,4}[:：]" + _NUM_HEAD_CN, line):
+        return True
+    # ③ 数字+顿号：1、菈菈！/ 10、xxx（排除条款"1、2、3"列举、排除"1、甲方…"式合同条款开头，
+    # 限 30 字短行）
+    if len(line) <= 30 and re.match(r"^\d{1,4}[、](?![甲乙丙丁])" + _NUM_HEAD_CN, line):
+        return True
+    # ⑤ 中文数字+顿号：一、厄里斯女神的迎接
+    # 排除"千、千万别抱上来"式人名对话（开头限一~十）与"一、二、三……"式列举（顿号后不能接数字）
+    if re.match(r"^[一二三四五六七八九十]+[、](?![\d一二三四五六七八九十百千])" + _NUM_HEAD_CN, line):
+        return True
+    # ④ 数字直连汉字：0001努力到了快30岁 / 1穿越,新的世界.
+    # 限 20 字短行（真标题短，正文长句如"3阶装备在游戏初期很强力……"直接排除）；
+    # 负向断言排除量词/单位/等级词/年份/日期开头（30岁/12月25日/2024年/10点/2阶装备/3000以内）；
+    # 数字后必须接汉字
+    if len(line) <= 20 and re.match(r"^\d{1,4}(?![\d" + _NUM_DIRECT_BAD + r"])" + _NUM_HEAD_CN, line):
+        return True
+    # ⑥ 数字+空格：001 和游戏一起穿越 / 306 破坏，制造骚乱（编号+半角空格+标题）
+    # 空格后接汉字；排除"2024 年/12 月/3 阶/3000 以内"式正文（空格后接量词/等级词）
+    if len(line) <= 45 and re.match(r"^\d{1,4} (?![\d" + _NUM_DIRECT_BAD + r"])" + _NUM_HEAD_CN, line):
+        return True
+    # 卷名：数字.标题（如「乐子人在蓝星：1.签下合约吧」）；排除【〔［ 开头（时间戳/标注）
+    if re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", line):
+        return True
+    return False
+
+
 def _detect_num_heads(lines):
-    """检测'数字.标题'格式的标题行（trxs.cc 等站点：1.标题 / 卷名：1.标题）。
+    """检测'数字编号'格式的标题行（trxs.cc 等站点：1.标题 / 0001：标题 / 1、标题 /
+    0001直连标题 / 一、标题 等）。
 
     仅用于主分章的兜底重切与候选池（严格条件：长度 6-45、排除正文噪音），
     不进入常规 _detect_heads，避免切坏"第X章"正常书。
@@ -289,9 +337,7 @@ def _detect_num_heads(lines):
             continue
         if any(m in low for m in ("点赞", "评论", "转发", "播放", "弹幕")):
             continue
-        if re.match(r"^\d{1,4}[.．]\S", line):
-            heads.append((i, line))
-        elif re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", line):
+        if _num_head_match(line):
             heads.append((i, line))
     return heads
 
@@ -306,14 +352,18 @@ def split_chapters(text):
     """
     lines = text.split("\n")
 
-    # 内层标题（带章节名的行内标题，编号连续）优先
+    # 内层标题（带章节名的行内标题，编号连续）优先——仅当外层行首标题更稀疏时
+    # （外层大段"书名 第N章"+内层真章节 结构）；若外层行首标题数 >= 内层数，
+    # 说明外层已是完整章节结构（如"跟你们战斗像坐牢"：274 个行首第X章 vs 52 个内层），
+    # 用外层更细，避免内层把大段正文并成一章。
     inner = _detect_inner_heads(lines)
-    if _inner_continuous(inner):
+    heads0 = _detect_heads(lines)
+    if _inner_continuous(inner) and len(inner) >= len(heads0):
         chapters = _split_by_inner(text, inner)
         if len(chapters) >= 2:
             return chapters
 
-    heads = _detect_heads(lines)
+    heads = heads0
     chapters = _chapters_from_heads(lines, heads)
 
     # 常规标题切不出可靠章节或切出的章节极少，但有大量候选标题 → 按候选重切
@@ -327,10 +377,42 @@ def split_chapters(text):
             num_chapters = _chapters_from_heads(lines, cands)
             if num_chapters and len(num_chapters) >= 2:
                 chapters = num_chapters
+    else:
+        # 常规章节已切出但存在大量"数字标题"（0001.xxx 等），且显著多于常规标题
+        # → 混合格式书（如"综漫之最强训练家"：前半 0001-2174 数字标题 + 后半"第X章"），
+        # 只按常规标题切会丢掉前半 → 合并两类标题按位置重切，覆盖全本。
+        # 正常"第X章"书数字标题为 0，不受影响；数字标题书兜底路径在上面已覆盖。
+        # 合并重切只用"强编号格式"（点号/冒号/空格/卷名：数字后带明确分隔符），
+        # 排除直连/顿号等宽松格式——"310寝室。"式正文场景段首会被直连格式误判，
+        # 混入合并会整本误切（如"时间停止，我在末世无敌了"）。
+        num_heads = _detect_num_heads(lines)
+        strong_num = [h for h in num_heads
+                      if re.match(r"^\d{1,4}[.．]\S", h[1])
+                      or re.match(r"^\d{1,4}[:：]" + _NUM_HEAD_CN, h[1])
+                      or re.match(r"^\d{1,4} " + _NUM_HEAD_CN, h[1])
+                      or re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", h[1])]
+        if len(strong_num) >= 20 and len(strong_num) > len(heads) * 1.5:
+            merged = sorted(strong_num + heads, key=lambda x: x[0])
+            merged_chapters = _chapters_from_heads(lines, merged)
+            if merged_chapters and len(merged_chapters) > len(chapters):
+                chapters = merged_chapters
 
     if len(chapters) < 2:
         # 标题集中在文首（如目录），正文没被切到 → 不可靠
         return None
+    # "目录 + 无换行全文"病态格式兜底：标题行密集排列（相邻间距极小，如每 3 行 4 个标题
+    # ——txtsk.com 老站导出的书目录堆在一起），正文区只剩最后一个标题吞掉全部正文，
+    # 切出 2~3 个章节且最大 body 占总量 >90% → 判定不可靠，返回 None（走整本读/手动标记弹窗）。
+    # 正常章节少的书标题行稀疏、body 分布均匀，不触发。
+    if len(chapters) <= 3 and len(heads) >= 3:
+        bodies = [len(b) for _, b in chapters]
+        total = sum(bodies)
+        if total > 0 and max(bodies) / total > 0.9:
+            idxs = sorted(h[0] for h in heads)
+            gaps = [idxs[i + 1] - idxs[i] for i in range(len(idxs) - 1)]
+            gaps.sort()
+            if gaps[len(gaps) // 2] <= 5:
+                return None
     # 给没有换行的正文按句子加上换行（如空格分段的文本）
     chapters = [(_t, _add_linebreaks(_b)) for _t, _b in chapters]
     return chapters
@@ -426,9 +508,9 @@ def collect_candidates(lines, max_len=60):
             cands.append((i, line))
         elif any(line.startswith(k) for k in _CAND_KW):
             cands.append((i, line))
-        # 数字编号标题：1.标题 / 012．标题（trxs.cc 等站点常见；仅认点号，顿号多为条款/列表；
-        # 长度下限 6 过滤"2.安诗鱼"式正文人名小标题）
-        elif 6 <= len(line) <= 45 and re.match(r"^\d{1,4}[.．]\S", line):
+        # 数字编号标题：1.标题 / 0001：标题 / 1、标题 / 0001直连标题 / 一、标题
+        # （长度下限 6 过滤"2.安诗鱼"式正文人名小标题；噪音由 _num_head_match 内部排除）
+        elif _num_head_match(line):
             cands.append((i, line))
         # 卷名：数字.标题（如「乐子人在蓝星：1.签下合约吧」）；排除【〔［ 开头（时间戳/标注）
         elif 6 <= len(line) <= 45 and re.match(r"^[^【〔［\s].{1,13}[：:]\d{1,4}[.．]\S", line):
