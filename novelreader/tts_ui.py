@@ -184,7 +184,7 @@ class TtsMixin:
             self.tts_lyric_btn.configure(text=_T("桌面模式"))
             self._flash_status(_T("桌面歌词已关闭"))
             return
-        from lyric_ui import LyricWindow
+        from .lyric_ui import LyricWindow
         self._lyric = LyricWindow(self.root, self)
         self.tts_lyric_btn.configure(text=_T("桌面模式"))
         self._flash_status(_T("桌面歌词已开启，可拖动 / 缩放 / 锁定"))
