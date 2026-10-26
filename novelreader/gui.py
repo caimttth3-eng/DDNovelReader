@@ -588,6 +588,8 @@ class NovelReaderBase:
         self.text_menu.add_command(label=_T("百度搜索"), command=lambda: self._search_selection("baidu"))
         self.text_menu.add_command(label=_T("谷歌搜索"), command=lambda: self._search_selection("google"))
         self.text_menu.add_command(label=_T("必应搜索"), command=lambda: self._search_selection("bing"))
+        self.text_menu.add_command(label=_T("B站搜索"), command=lambda: self._search_selection("bilibili"))
+        self.text_menu.add_command(label=_T("抖音搜索"), command=lambda: self._search_selection("douyin"))
         self.text_menu.add_command(label=_T("百度翻译"), command=lambda: self._search_selection("baidu_translate"))
         self.text_menu.add_command(label=_T("谷歌翻译"), command=lambda: self._search_selection("google_translate"))
         self.text_menu.add_command(label=_T("搜狗翻译"), command=lambda: self._search_selection("sogou_translate"))

@@ -1644,15 +1644,27 @@ class SpeechController:
 
     def _ensure_engine(self):
         # 仅 SAPI 后端需要 pyttsx3；Edge 后端按需初始化 pygame。
-        # pyttsx3.init() 必须在主线程/COM 就绪环境执行，工作线程里会抛异常导致朗读线程崩溃。
+        # pyttsx3/SAPI 是 COM 组件：朗读工作线程必须先 CoInitialize 当前线程的 COM 公寓，
+        # 否则 pyttsx3.init() 抛 CO_E_NOTINITIALIZED（被吞）→ _engine 为 None → 后续 .connect 崩溃。
         if self._backend != "sapi":
             return
         if self._engine is None and pyttsx3 is not None:
             try:
+                self._coinit_com()
                 self._engine = pyttsx3.init()
                 self._engine.startLoop(useDriverLoop=False)
-            except Exception:
+            except Exception as e:
+                self._sapi_err = repr(e)
                 self._engine = None
+
+    @staticmethod
+    def _coinit_com():
+        """初始化当前线程的 COM 公寓（幂等），供 SAPI/pyttsx3 在朗读工作线程使用。"""
+        for mod in ("comtypes", "pythoncom"):
+            try:
+                getattr(__import__(mod), "CoInitialize")()
+            except Exception:
+                pass
 
     def _sync_props(self):
         with self._cv:
@@ -1771,11 +1783,32 @@ class SpeechController:
         return text, offset + start + len(text), start
 
     # ---------- SAPI 后端 ----------
-    def _speak_sapi(self, text, gen):
-        """系统语音朗读一句，阻塞到结束或被暂停/停止打断。"""
+    def _speak_sapi(self, text, gen, fallback=False):
+        """系统语音朗读一句，阻塞到结束或被暂停/停止打断。
+        fallback=True：Edge 联网失败后的回退朗读——系统语音不可用时跳过本句继续，不终止整本。"""
         if not text:
             return False
         self._ensure_engine()
+        if self._engine is None:
+            # 系统语音（SAPI）初始化失败：明确提示，避免对 None 调用 .connect 裸崩
+            reason = getattr(self, "_sapi_err", "") or ""
+            if not fallback:
+                # 主用系统语音：无法朗读 → 终止会话并明确报错
+                self._post(
+                    {
+                        "type": "error",
+                        "message": "系统语音不可用（SAPI 初始化失败%s），请检查系统语音设置或改用在线语音"
+                        % ("：" + reason if reason else ""),
+                    }
+                )
+                return False
+            # Edge 联网失败后的回退：系统语音也用不了 → 跳过本句继续朗读（仅提示一次防刷屏）
+            if not self._edge_fail_posted:
+                self._edge_fail_posted = True
+                self._post(
+                    {"type": "error", "message": "联网语音与系统语音均不可用，本句已跳过"}
+                )
+            return True
         done = threading.Event()
 
         def _on_finished(name=None, completed=None, **kw):
@@ -1872,14 +1905,14 @@ class SpeechController:
         if not self._edge_fail_posted:
             self._edge_fail_posted = True
             self._post(
-                {"type": "error", "message": "联网语音生成失败，本句已用系统语音朗读"}
+                {"type": "error", "message": "联网语音生成失败，正在尝试系统语音"}
             )
         try:
             self._edge_prefetch.close()
         except Exception:
             pass
         self._edge_prefetch = None
-        return self._speak_sapi(text, gen)
+        return self._speak_sapi(text, gen, fallback=True)
 
     def _speak_edge_play(self, audio, gen):
         """用平台播放器播放预生成的 MP3（Windows=MCI，macOS/Linux=pygame），支持暂停/停止。"""

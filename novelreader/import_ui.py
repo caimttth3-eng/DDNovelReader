@@ -90,6 +90,8 @@ class ImportMixin:
             "baidu": f"https://www.baidu.com/s?wd={q}",
             "google": f"https://www.google.com/search?q={q}",
             "bing": f"https://www.bing.com/search?q={q}",
+            "bilibili": f"https://search.bilibili.com/all?keyword={q}",
+            "douyin": f"https://www.douyin.com/search/{q}",
             "baidu_translate": f"https://fanyi.baidu.com/#auto/zh/{q}",
             "google_translate": f"https://translate.google.com/?sl=auto&tl=zh-CN&text={q}",
             "sogou_translate": f"https://fanyi.sogou.com/text?keyword={q}",
