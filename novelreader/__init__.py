@@ -2,5 +2,5 @@
 
 "小说阅读器（Windows / TTS 语音朗读版）。"
 
-__version__ = "2.2v1"
+__version__ = "2.2v2"
 

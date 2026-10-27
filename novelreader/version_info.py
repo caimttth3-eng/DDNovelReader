@@ -6,6 +6,13 @@ APP_NAME = "多多朗读"
 # 最新版本在前。每次发版时在此追加新条目，并同步更新 novelreader/__init__.py 的 __version__。
 VERSION_HISTORY = [
     {
+        "version": "2.2v2",
+        "date": "2026-10-27",
+        "changes": [
+            "新增繁体中文界面（第五种语言）：台湾 / 香港 / 澳门系统自动检测启用（Windows 按区域子语言、macOS/Linux 按 locale 区分简繁），界面语言下拉新增「繁體中文」，原「中文」更名为「简体中文」",
+        ],
+    },
+    {
         "version": "2.2v1",
         "date": "2026-10-26",
         "changes": [

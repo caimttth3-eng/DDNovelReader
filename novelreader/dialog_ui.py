@@ -402,10 +402,10 @@ class DialogMixin:
         tk.Label(lang_row, text=_T("界面语言"), fg="#555555", bg=_bg,
                  font=("微软雅黑", 10)).pack(side="left")
         lang_cb = ttk.Combobox(lang_row, state="readonly", width=10,
-                               values=["中文", "English", "日本語", "한국어"])
+                               values=["简体中文", "繁體中文", "English", "日本語", "한국어"])
         lang_cb.pack(side="left")
         from .i18n import get_lang as _get_lang
-        _lang_map = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
+        _lang_map = {"zh": "简体中文", "zh_tw": "繁體中文", "en": "English", "ja": "日本語", "ko": "한국어"}
         lang_cb.set(_lang_map.get(_get_lang(), "中文"))
         def _on_lang(e=None):
             v = lang_cb.get()

@@ -841,8 +841,8 @@ class NovelReaderBase:
             self.voice_cb.current(idx)
             self.tts.set_voice(self._voice_ids[idx])
         elif voices:
-            # 非中文界面默认本语言第一个音色；中文界面默认第一个本地（系统）语音
-            if self.settings.get("ui_lang") != "zh":
+            # 非中文界面默认本语言第一个音色；简体/繁体中文界面默认第一个本地（系统）语音
+            if self.settings.get("ui_lang") not in ("zh", "zh_tw"):
                 idx = 0
             else:
                 idx = getattr(self, "_first_sapi_idx", 0)
