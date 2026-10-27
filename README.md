@@ -49,14 +49,14 @@
 
 在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载对应平台的最新版，绿色免安装：
 
-- **Windows（单文件版）**：`DDNovelReader_v2.2v2_Windows.exe`，双击即可运行（自解压式，启动稍慢但便携，无需安装）
-- **Windows（onedir 版）**：`DDNovelReader_v2.2v2_Windows_onedir.zip`，解压后进入文件夹双击 `多多朗读.exe`（运行库随包存放，**启动秒开**，推荐低配 / 机械硬盘用户；zip 需解压后使用）
-- **macOS**：`DDNovelReader-macOS_v2.2v2.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
+- **Windows（单文件版）**：`DDNovelReader_v2.2.3_Windows.exe`，双击即可运行（自解压式，启动稍慢但便携，无需安装）
+- **Windows（onedir 版）**：`DDNovelReader_v2.2.3_Windows_onedir.zip`，解压后进入文件夹双击 `多多朗读.exe`（运行库随包存放，**启动秒开**，推荐低配 / 机械硬盘用户；zip 需解压后使用）
+- **macOS**：`DDNovelReader-macOS_v2.2.3.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
   1. **DMG**：双击挂载 → 把 `DDNovelReader.app` 拖入「应用程序」文件夹
   2. **ZIP**：双击解压得到 `DDNovelReader.app`，拖入「应用程序」文件夹
   3. 首次打开若提示「无法验证开发者」：右键 app → 打开 → 再次点击「打开」；或在 系统设置 → 隐私与安全性 中点「仍要打开」
   4. 若提示「已损坏，无法打开」：打开终端执行 `sudo xattr -dr com.apple.quarantine /Applications/DDNovelReader.app` 后重试
-- **Linux**：`DDNovelReader_v2.2v2_Linux.zip`，安装步骤：
+- **Linux**：`DDNovelReader_v2.2.3_Linux.zip`，安装步骤：
   1. 解压得到可执行文件后，在终端进入文件所在目录
   2. 加执行权限：`chmod +x DDNovelReader`
   3. 运行：`./DDNovelReader`
