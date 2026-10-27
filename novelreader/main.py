@@ -165,6 +165,13 @@ def main():
     app = NovelReaderApp(root)
     _dbg("m6 app made")
 
+    # 更新提示：后台检查 GitHub 最新版本，有新版本弹窗提示（延迟数秒，不影响启动）
+    try:
+        from novelreader.updater import start_check
+        root.after(3000, lambda: start_check(root, app.storage))
+    except Exception:
+        pass
+
     # 轮询单实例激活队列：收到请求就在主线程还原窗口（线程安全）
     _q = _queue.Queue()
     _si.start_listener(_q)

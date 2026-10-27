@@ -414,11 +414,18 @@ class DialogMixin:
             messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
         lang_cb.bind("<<ComboboxSelected>>", _on_lang)
 
-        tk.Button(top, text=_T("支持开发者"), command=self._show_donate,
+        btn_row = tk.Frame(top, bg=_bg)
+        btn_row.pack(anchor="w", padx=20, pady=(10, 2))
+        tk.Button(btn_row, text=_T("支持开发者"), command=self._show_donate,
                   bg="#2b6cb0", fg="white", activebackground="#1e4e79",
                   activeforeground="white", font=("微软雅黑", 10, "bold"),
                   relief="flat", padx=18, pady=5, cursor="hand2"
-                  ).pack(anchor="w", padx=20, pady=(10, 2))
+                  ).pack(side="left")
+        tk.Button(btn_row, text=_T("检查最新版本"), command=self._check_update,
+                  bg="#e2e8f0", fg="#1a202c", activebackground="#cbd5e0",
+                  activeforeground="#1a202c", font=("微软雅黑", 10, "bold"),
+                  relief="flat", padx=16, pady=5, cursor="hand2"
+                  ).pack(side="left", padx=(10, 0))
 
         tk.Label(top, text=_T("更多功能请从主界面「设置」打开（缓存管理 / 快捷键说明 / 更新记录）。"),
                  fg="#8a5a00", bg=_bg, font=("微软雅黑", 9),
@@ -432,6 +439,14 @@ class DialogMixin:
         self._center_window(top)
         self._about_win = top
         top.focus_set()
+
+    def _check_update(self):
+        """手动检查最新版本（关于窗口按钮）：有新版→弹更新窗；已是最新/失败→提示。"""
+        try:
+            from .updater import check_update_manual
+            check_update_manual(self.root, self.storage)
+        except Exception:
+            pass
 
     def _show_donate(self):
         """独立弹窗：支持开发者（支付宝 / 微信收款码 + 免责声明）。"""

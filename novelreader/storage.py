@@ -114,6 +114,7 @@ DEFAULT_SETTINGS = {
     "tts_sentence_gap": 0.10,  # 句子停顿间隔（秒）
     "tts_cache_dir": "",       # 自定义整本语音缓存根目录（空=默认 %APPDATA%\\DDNovelReader\\tts_cache）
     "tts_cache_workers": 6,   # 整本缓存并发下载线程数（3~12，超过 6 易被微软限流）
+    "skip_update_version": "", # 用户选择「跳过此版本」的版本号（更新提示不再提醒该版本）
 }
 
 
