@@ -414,6 +414,12 @@ class DialogMixin:
             messagebox.showinfo(_T("提示"), _T("界面语言已切换，重启软件后生效"), parent=top)
         lang_cb.bind("<<ComboboxSelected>>", _on_lang)
 
+        tk.Button(top, text=_T("支持开发者"), command=self._show_donate,
+                  bg="#2b6cb0", fg="white", activebackground="#1e4e79",
+                  activeforeground="white", font=("微软雅黑", 10, "bold"),
+                  relief="flat", padx=18, pady=5, cursor="hand2"
+                  ).pack(anchor="w", padx=20, pady=(10, 2))
+
         tk.Label(top, text=_T("更多功能请从主界面「设置」打开（缓存管理 / 快捷键说明 / 更新记录）。"),
                  fg="#8a5a00", bg=_bg, font=("微软雅黑", 9),
                  wraplength=560, justify="left").pack(anchor="w", padx=20, pady=(8, 4))
@@ -425,6 +431,55 @@ class DialogMixin:
         top.geometry(f"{_w}x{_h}")
         self._center_window(top)
         self._about_win = top
+        top.focus_set()
+
+    def _show_donate(self):
+        """独立弹窗：支持开发者（支付宝 / 微信收款码 + 免责声明）。"""
+        from PIL import Image, ImageTk
+
+        top = tk.Toplevel(self.root)
+        top.title(_T("支持开发者"))
+        top.transient(self.root)
+        _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
+        top.configure(bg=_bg)
+
+        def _asset(name):
+            base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            return os.path.join(base, "assets", name)
+
+        tk.Label(top, text=_T("该捐款仅供开发者吃喝玩乐，与开发软件无关"),
+                 fg="#8a5a00", bg=_bg, font=("微软雅黑", 11, "bold")
+                 ).pack(padx=24, pady=(20, 6))
+
+        row = tk.Frame(top, bg=_bg)
+        row.pack(padx=28, pady=(6, 4))
+        self._donate_imgs = []
+        for key, label in (("donate_alipay.png", "支付宝"), ("donate_wechat.png", "微信")):
+            col = tk.Frame(row, bg=_bg)
+            col.pack(side="left", padx=10)
+            try:
+                img = Image.open(_asset(key)).convert("RGB")
+                nh = 210
+                nw = max(1, round(img.width * nh / img.height))
+                img = img.resize((nw, nh), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                self._donate_imgs.append(photo)
+                tk.Label(col, image=photo, bg=_bg).pack()
+            except Exception:
+                tk.Label(col, text=label, fg="#999999", bg=_bg).pack(padx=60, pady=80)
+            tk.Label(col, text=label, fg="#555555", bg=_bg,
+                     font=("微软雅黑", 9)).pack(pady=(4, 0))
+
+        tk.Button(top, text=_T("确定"), command=top.destroy, bg="#2b6cb0", fg="white",
+                  activebackground="#1e4e79", activeforeground="white",
+                  font=("微软雅黑", 10), relief="flat", padx=24, pady=4,
+                  cursor="hand2").pack(pady=(12, 16))
+
+        top.update_idletasks()
+        _w = min(max(top.winfo_reqwidth() + 40, 480), int(top.winfo_screenwidth() * 0.94))
+        _h = min(top.winfo_reqheight() + 30, int(top.winfo_screenheight() * 0.94))
+        top.geometry(f"{_w}x{_h}")
+        self._center_window(top)
         top.focus_set()
 
     def _open_skin_picker(self):

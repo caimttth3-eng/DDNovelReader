@@ -66,7 +66,7 @@ for _root in (_venv, _base_py):
             _tk_scripts = _ck
 
 # --- 组装 datas（数据文件）---
-_datas = [('assets/app.ico', 'assets'), ('assets/skins', 'assets/skins'), ('assets/icons', 'assets/icons')]
+_datas = [('assets/app.ico', 'assets'), ('assets/skins', 'assets/skins'), ('assets/icons', 'assets/icons'), ('assets/donate_alipay.png', 'assets'), ('assets/donate_wechat.png', 'assets')]
 # tkinterdnd2 的 tkdnd 二进制（只打包 win-x64，减小包体）
 _tkdnd_dir = os.path.join(_sp, 'tkinterdnd2', 'tkdnd', 'win-x64')
 if os.path.isdir(_tkdnd_dir):
