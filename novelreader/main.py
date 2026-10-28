@@ -165,6 +165,16 @@ def main():
     app = NovelReaderApp(root)
     _dbg("m6 app made")
 
+    # 系统托盘：最小化缩入托盘（pystray 不可用时自动降级为普通最小化，不影响主程序）
+    _tray = None
+    try:
+        from novelreader.tray import TrayIcon
+        _tray = TrayIcon(root, app)
+        if not _tray.bind():
+            _tray = None
+    except Exception:
+        _tray = None
+
     # 更新提示：后台检查 GitHub 最新版本，有新版本弹窗提示（延迟数秒，不影响启动）
     try:
         from novelreader.updater import start_check

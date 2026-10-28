@@ -10,3 +10,6 @@ psutil>=5.9
 tkinterdnd2>=0.4
 pygame>=2.6
 gTTS>=2.5
+pystray>=0.19.5
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
