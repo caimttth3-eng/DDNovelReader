@@ -39,6 +39,7 @@ class ShelfMixin:
     """书架界面：列表 / 排序 / 多选 / 右键 / 复制 / 删除音频缓存 / 书架开合"""
     def _refresh_bookshelf(self):
         self._init_shelf_size_cache()
+        self._shelf_drag_reset()
         # 保存当前选中
         sel_bids = set()
         try:
@@ -128,6 +129,139 @@ class ShelfMixin:
         except Exception:
             return []
         return [s for s in sel if s != "__empty__"]
+
+    # ---------- 书架鼠标框选（按住左键拖动连续多选） ----------
+    def _shelf_rows(self):
+        """书架里的书籍行（排除空书架占位行）。"""
+        try:
+            return [iid for iid in self.shelf_tree.get_children() if iid != "__empty__"]
+        except Exception:
+            return []
+
+    def _shelf_row_index_at(self, x, y):
+        """返回坐标所在的行序号；空白区域按最近的边界行归属，无书时返回 None。"""
+        rows = self._shelf_rows()
+        if not rows:
+            return None
+        try:
+            if self.shelf_tree.identify_region(x, y) in ("heading", "separator"):
+                return None
+        except Exception:
+            pass
+        iid = ""
+        try:
+            iid = self.shelf_tree.identify_row(y)
+        except Exception:
+            pass
+        if iid:
+            try:
+                return rows.index(iid)
+            except ValueError:
+                return None
+        # 空白处（末行之下 / 行间缝隙）：归到最近的上一行或末行之后
+        for idx, rid in enumerate(rows):
+            try:
+                bb = self.shelf_tree.bbox(rid)
+            except Exception:
+                bb = None
+            if not bb:
+                continue
+            if y < bb[1] + bb[3] / 2:
+                return idx
+        return len(rows)
+
+    def _shelf_drag_reset(self):
+        self._shelf_drag_anchor = None
+        self._shelf_drag_active = False
+        self._shelf_drag_base = set()
+        self._shelf_drag_append = False
+
+    def _shelf_drag_begin(self, event):
+        """按下左键：记录拖拽起点（不拦截事件，单击仍走 Treeview 默认选中）。"""
+        self._shelf_drag_reset()
+        try:
+            region = self.shelf_tree.identify_region(event.x, event.y)
+        except Exception:
+            region = ""
+        if region in ("heading", "separator"):
+            return
+        idx = self._shelf_row_index_at(event.x, event.y)
+        if idx is None:
+            return
+        self._shelf_drag_anchor = idx
+        self._shelf_drag_start_y = event.y
+        self._shelf_drag_start_x = event.x
+        # Ctrl / Shift 拖动 = 在原选择上追加，否则重新框选（macOS 用 Command）
+        state = getattr(event, "state", 0)
+        mod = bool((state & 0x0004) or (state & 0x0001))
+        if sys.platform == "darwin" and (state & 0x0008):
+            mod = True
+        self._shelf_drag_append = mod
+        self._shelf_drag_base = set(self._shelf_rows()) & set(self.shelf_tree.selection())
+
+    def _shelf_drag_motion(self, event):
+        """拖动中：把起点到当前行之间的书全部选中，边界处自动滚动。"""
+        anchor = getattr(self, "_shelf_drag_anchor", None)
+        if anchor is None:
+            return
+        if not getattr(self, "_shelf_drag_active", False):
+            dx = abs(event.x - getattr(self, "_shelf_drag_start_x", event.x))
+            dy = abs(event.y - getattr(self, "_shelf_drag_start_y", event.y))
+            if dx < 4 and dy < 4:
+                return
+            self._shelf_drag_active = True
+        try:
+            h = self.shelf_tree.winfo_height()
+            if event.y < 14:
+                self.shelf_tree.yview_scroll(-1, "units")
+            elif event.y > h - 14:
+                self.shelf_tree.yview_scroll(1, "units")
+        except Exception:
+            pass
+        idx = self._shelf_row_index_at(event.x, event.y)
+        rows = self._shelf_rows()
+        if idx is None or not rows:
+            return "break"
+        lo, hi = sorted((anchor, idx))
+        lo = max(0, lo)
+        hi = min(len(rows) - 1, hi)
+        range_ids = rows[lo:hi + 1] if hi >= lo else []
+        base = getattr(self, "_shelf_drag_base", set()) if getattr(self, "_shelf_drag_append", False) else set()
+        chosen = set(range_ids) | base
+        final = [rid for rid in rows if rid in chosen]
+        try:
+            if tuple(final) != tuple(self.shelf_tree.selection()):
+                self.shelf_tree.selection_set(tuple(final))
+                focus_iid = rows[min(max(idx, 0), len(rows) - 1)]
+                self.shelf_tree.focus(focus_iid)
+        except Exception:
+            pass
+        return "break"
+
+    def _shelf_drag_end(self, event=None):
+        self._shelf_drag_reset()
+
+    def _shelf_select_all(self, event=None):
+        """Ctrl+A 全选书架。"""
+        rows = self._shelf_rows()
+        if rows:
+            try:
+                self.shelf_tree.selection_set(tuple(rows))
+                self.shelf_tree.focus(rows[-1])
+                self.shelf_tree.see(rows[-1])
+            except Exception:
+                pass
+        return "break"
+
+    def _open_shelf_row(self, event):
+        """双击按鼠标所在行打开，避免多选后打开第一本。"""
+        try:
+            iid = self.shelf_tree.identify_row(event.y)
+        except Exception:
+            iid = ""
+        if iid and iid != "__empty__":
+            self.open_book(iid)
+
     def _popup_shelf_menu(self, event):
         # 右键点击的行
         iid = self.shelf_tree.identify_row(event.y)
@@ -152,6 +286,21 @@ class ShelfMixin:
                 src_ok = (sp and os.path.exists(sp)) or (sbak and os.path.exists(sbak))
         self.shelf_menu.entryconfigure(_T("复制原文件"), state="disabled" if (multi or not src_ok) else "normal")
         self.shelf_menu.entryconfigure(_T("复制书名"), state="disabled" if multi else "normal")
+        # 多选时删除菜单显示数量，明确是批量操作
+        try:
+            n = len(sel)
+            if multi:
+                self.shelf_menu.entryconfigure(
+                    self._shelf_del_keep_idx,
+                    label=_T("删除选中的 {n} 本（保留缓存）").format(n=n))
+                self.shelf_menu.entryconfigure(
+                    self._shelf_del_clear_idx,
+                    label=_T("删除选中的 {n} 本文件（清空缓存）").format(n=n))
+            else:
+                self.shelf_menu.entryconfigure(self._shelf_del_keep_idx, label=_T("删除（保留缓存）"))
+                self.shelf_menu.entryconfigure(self._shelf_del_clear_idx, label=_T("删除文件（清空缓存）"))
+        except Exception:
+            pass
         try:
             self._mv_refresh_menu_state()
         except Exception:

@@ -2,7 +2,7 @@
 """系统托盘：最小化缩入托盘（三平台，pystray）。
 
 - 最小化（iconic）→ 隐藏主窗口并在系统托盘显示图标
-- 托盘菜单：显示主窗口 / 退出（文案走 _T() 五语言）
+- 托盘菜单：显示主窗口 / 打开歌词字幕 / 退出（文案走 _T() 五语言）
 - pystray 缺失或平台后端不可用时自动降级：最小化按普通行为，不影响主程序
 """
 import os
@@ -102,6 +102,7 @@ class TrayIcon:
             img = self._tray_image()
             menu = pystray.Menu(
                 pystray.MenuItem(_T("显示主窗口"), self._show, default=True),
+                pystray.MenuItem(_T("打开歌词字幕"), self._open_lyric),
                 pystray.MenuItem(_T("退出"), self._quit),
             )
             self._icon = pystray.Icon("DDNovelReader", img, "多多朗读", menu)
@@ -163,6 +164,30 @@ class TrayIcon:
             except Exception:
                 pass
             self.root.focus_force()
+        except Exception:
+            pass
+
+    def _open_lyric(self, icon=None, item=None):
+        """托盘菜单：快速打开歌词字幕窗（已打开则置前，不再重复创建）。"""
+        try:
+            self.root.after(0, self._open_lyric_main)
+        except Exception:
+            pass
+
+    def _open_lyric_main(self):
+        try:
+            lyr = getattr(self.app, "_lyric", None)
+            alive = False
+            try:
+                alive = lyr is not None and lyr.win.winfo_exists()
+            except Exception:
+                alive = False
+            if alive:
+                lyr.show()
+                return
+            toggle = getattr(self.app, "_toggle_lyric", None)
+            if callable(toggle):
+                toggle()
         except Exception:
             pass
 

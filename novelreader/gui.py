@@ -519,7 +519,15 @@ class NovelReaderBase:
         self.shelf_tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.shelf_tree.pack(side="left", fill="both", expand=True)
-        self.shelf_tree.bind("<Double-Button-1>", lambda e: self._open_selected())
+        # 双击打开鼠标所在行；拖拽框选连续多选；Ctrl+A 全选
+        self.shelf_tree.bind("<Double-Button-1>", self._open_shelf_row)
+        self.shelf_tree.bind("<ButtonPress-1>", self._shelf_drag_begin)
+        self.shelf_tree.bind("<B1-Motion>", self._shelf_drag_motion)
+        self.shelf_tree.bind("<ButtonRelease-1>", self._shelf_drag_end)
+        self.shelf_tree.bind("<Control-a>", self._shelf_select_all)
+        self.shelf_tree.bind("<Control-A>", self._shelf_select_all)
+        if sys.platform == "darwin":
+            self.shelf_tree.bind("<Command-a>", self._shelf_select_all)
         self.shelf_tree.bind("<Return>", lambda e: self._open_selected())
         self.shelf_tree.bind("<Button-3>", self._popup_shelf_menu)
         # 拖拽导入：拖文件到书架区或主窗口任意位置即可导入
@@ -537,7 +545,9 @@ class NovelReaderBase:
         self.shelf_menu.add_command(label=_T("复制书名"), command=self._copy_book_title)
         self.shelf_menu.add_separator()
         self.shelf_menu.add_command(label=_T("删除（保留缓存）"), command=lambda: self._remove_book(False))
+        self._shelf_del_keep_idx = self.shelf_menu.index("end")
         self.shelf_menu.add_command(label=_T("删除文件（清空缓存）"), command=lambda: self._remove_book(True))
+        self._shelf_del_clear_idx = self.shelf_menu.index("end")
 
         btn_row = tk.Frame(left)
         btn_row.pack(fill="x")

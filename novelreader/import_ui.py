@@ -611,36 +611,54 @@ class ImportMixin:
                     self._reprocess_book(meta["path"], bid)
                     break
     def _remove_book(self, clear_cache=False):
-        bid = self._selected_bid()
-        if not bid:
+        """删除选中的书：单选一本书，或多选时批量删除（逐本清理缓存/源文件备份）。"""
+        bids = self._selected_bids()
+        if not bids:
             return
-        meta = self.storage.get_book(bid)
-        if not meta:
+        metas = []
+        for bid in bids:
+            meta = self.storage.get_book(bid)
+            if meta:
+                metas.append((bid, meta))
+        if not metas:
             return
         label = _T("删除文件") if clear_cache else _T("删除书籍")
         tip = (_T("（从书架移除并清空缓存，不删除原文件）") if clear_cache
                else _T("（从书架移除，保留缓存，不删除原文件）"))
-        if not messagebox.askyesno(label, _T("确定{label}《{title}》？\n{tip}").format(label=label, title=meta.get("title", ""), tip=tip)):
+        n = len(metas)
+        if n == 1:
+            msg = _T("确定{label}《{title}》？\n{tip}").format(
+                label=label, title=metas[0][1].get("title", ""), tip=tip)
+        else:
+            names = "\n".join("  · " + (meta.get("title") or _T("未命名"))
+                              for _bid, meta in metas[:5])
+            if n > 5:
+                names += "\n  · …"
+            msg = _T("确定删除选中的 {n} 本书？\n{names}\n{tip}").format(
+                n=n, names=names, tip=tip)
+        if not messagebox.askyesno(label, msg):
             return
         self.tts.stop()
-        self.storage.remove_book(bid)
-        self._cache.pop(bid, None)
-        if clear_cache:
-            # 删除文本解析缓存
-            cp = self.storage.cache_path(bid)
-            if cp and os.path.exists(cp):
+        removed = {bid for bid, _meta in metas}
+        for bid, _meta in metas:
+            self.storage.remove_book(bid)
+            self._cache.pop(bid, None)
+            if clear_cache:
+                # 删除文本解析缓存
+                cp = self.storage.cache_path(bid)
+                if cp and os.path.exists(cp):
+                    try:
+                        os.remove(cp)
+                    except Exception:
+                        pass
+                # 删除源文件备份（原文件不删，只删软件自带的副本）
                 try:
-                    os.remove(cp)
+                    self.storage.remove_source_backup(bid)
                 except Exception:
                     pass
-            # 删除源文件备份（原文件不删，只删软件自带的副本）
-            try:
-                self.storage.remove_source_backup(bid)
-            except Exception:
-                pass
-            # 同步删除该书音频缓存（整本语音缓存）
-            self._delete_audio_cache(bid)
-        if self.current_bid == bid:
+                # 同步删除该书音频缓存（整本语音缓存）
+                self._delete_audio_cache(bid)
+        if self.current_bid in removed:
             self.current_bid = None
             self.book = None
             self._render_empty()

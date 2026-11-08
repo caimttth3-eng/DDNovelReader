@@ -700,6 +700,16 @@ class LyricWindow:
         except Exception:
             pass
 
+    def show(self):
+        """把已打开的歌词窗恢复显示并置前（托盘菜单用）。"""
+        try:
+            self.win.deiconify()
+            self.win.lift()
+            if self._on_top:
+                self.win.attributes("-topmost", True)
+        except Exception:
+            pass
+
     def close(self):
         try:
             self._save_all()
