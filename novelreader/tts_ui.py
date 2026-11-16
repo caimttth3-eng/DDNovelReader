@@ -22,7 +22,8 @@ from .storage import (
     dir_size,
     audio_cache_dirs,
 )
-from .tts_engine import SpeechController
+from .tts_engine import SpeechController, split_sentences
+from .textproc import clean_to_orig
 from .i18n import T as _T
 from .constants import (
     THEMES,
@@ -37,18 +38,21 @@ from .constants import (
 
 class TtsMixin:
     """TTS 控制：开始 / 暂停 / 继续 / 停止 / 语速 / 音量 / 语音切换"""
-    def _start_tts(self, book, ci, off):
-        """统一朗读入口（多人有声模块已下线，保留此入口供 tts_ui / reader_ui 调用）。"""
+    def _start_tts(self, book, ci, off, keep_prefetch=False):
+        """统一朗读入口（多人有声模块已下线，保留此入口供 tts_ui / reader_ui 调用）。
+
+        keep_prefetch=True 用于快捷键跳句：目标句通常已在预取队列里，直接取用即可
+        立即出声，不必丢弃队列重等一次完整合成。"""
         # GPT-SoVITS：目录未填→同步引导；填过但服务未启动→弹动画窗后台启动（不卡界面），
         # 启动完成后自动继续朗读。
         try:
             if getattr(self.tts, "is_gptsovits_active", lambda: False)():
                 self._ensure_gptsovits_async(
-                    lambda ok, why: self._on_gptsovits_ready(ok, why, book, ci, off))
+                    lambda ok, why: self._on_gptsovits_ready(ok, why, book, ci, off, keep_prefetch))
                 return
         except Exception:
             pass  # 探测/启动逻辑异常不影响正常朗读
-        self.tts.start(book, ci, off)
+        self.tts.start(book, ci, off, keep_prefetch=keep_prefetch)
 
     def _ensure_gptsovits_async(self, on_done):
         """GPT-SoVITS 引擎统一引导：目录未填→同步弹窗引导（on_done(False,'no_root')）；
@@ -131,7 +135,7 @@ class TtsMixin:
         top.after(100, _poll)
         tts_engine.ensure_gptsovits_service_async(self.settings, _finish)
 
-    def _on_gptsovits_ready(self, ok, why, book, ci, off):
+    def _on_gptsovits_ready(self, ok, why, book, ci, off, keep_prefetch=False):
         """GPT-SoVITS 服务就绪后继续朗读；失败给出对应提示。"""
         if not ok:
             if why == "no_root":
@@ -143,7 +147,8 @@ class TtsMixin:
             }.get(why, _T("GPT-SoVITS 服务不可用"))
             messagebox.showinfo(_T("提示"), msg)
             return
-        self.tts.start(book, ci, off)
+        self.tts.start(book, ci, off, keep_prefetch=keep_prefetch)
+
     def _tts_toggle(self):
         """开始 / 暂停 / 继续 切换。"""
         if not self.book:
@@ -159,6 +164,14 @@ class TtsMixin:
             self._start_tts(self.book, self.chapter_idx, self.char_offset)
             self._set_tts_ui("playing")
     def _tts_stop(self):
+        timer = getattr(self, "_jump_timer", None)
+        if timer:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
+        self._jump_timer = None
+        self._jump_reading = False
         self.tts.stop()
         self._set_tts_ui("stopped")
         self._clear_highlight()
@@ -319,44 +332,168 @@ class TtsMixin:
         return "break"
 
     def _jump_sentence(self, delta):
-        """快捷键 ← / →：跳到上一句 / 下一句（朗读中则从新句子继续读）。"""
+        """快捷键 ← / →：跳到上一句 / 下一句（重写版）。
+
+        执行顺序固定为三步，任何一步都不依赖其它步骤的时序：
+        1. 先静音：`halt_for_jump()` 同步停掉当前音频并推进令牌，旧会话立刻作废；
+        2. 再定位：阅读位置 / 高亮 / 进度条即时跟手（不等合成）；
+        3. 后开读：防抖后只按最后一次按键的位置开一个会话（连按十来下也只开一次）。
+        """
         if not self.book:
             return "break"
-        content = self.book.chapters[self.chapter_idx].content
-        n = len(content)
-        off = self.char_offset
-        if delta > 0:
-            # 下一句：从当前位置向后找句末标点
-            i = off
-            while i < n:
-                if content[i] in "。！？!?…；;":
-                    off = i + 1
-                    break
-                i += 1
+        offs = self._sentence_offsets(self.chapter_idx)
+        if not offs:
+            return "break"
+        cur = 0
+        for i, o in enumerate(offs):
+            if o <= self.char_offset:
+                cur = i
             else:
-                return "break"  # 已在章节末尾
+                break
+        k = cur + (1 if delta > 0 else -1)
+        cross = False
+        if k >= len(offs):
+            # 章末再按 → 直接进下一章第一句。否则一直按到头就停在最后一句不动，
+            # 看起来就是"卡住"（按键既不高亮也不出声）。
+            if self.chapter_idx + 1 >= len(self.book.chapters):
+                return "break"  # 全书最后一句：真的没有下一句了
+            ci, off, cross = self.chapter_idx + 1, 0, True
+        elif k < 0:
+            if self.chapter_idx <= 0:
+                return "break"
+            ci = self.chapter_idx - 1
+            prev = self._sentence_offsets(ci)
+            off, cross = (prev[-1] if prev else 0), True
         else:
-            # 上一句：直接跳到上一句的起点
-            cur = self._sentence_start(off)
-            if cur > 0:
-                off = self._sentence_start(cur - 1)
-            elif off > 0:
-                off = 0  # 第一句中间 → 回到第一句开头
-            else:
-                return "break"  # 已在第一句开头
-        off = min(off, n)
-        self.char_offset = off
-        was_active = self.tts.is_active()
-        if was_active:
-            # 朗读中：直接切换朗读位置，继续朗读
-            self._start_tts(self.book, self.chapter_idx, off)
+            ci, off = self.chapter_idx, offs[k]
+        # 是否"本来在朗读"：引擎在播/在暂停，或上一次跳句刚掐断、新会话还没开读。
+        # 后者必须算朗读中，否则连按时第二次键看到 idle 就不再排期，朗读会断掉。
+        self._jump_reading = bool(self._jump_reading or self.tts.is_active())
+        if self._jump_reading:
+            self.tts.halt_for_jump()   # 按键瞬间静音：同步停音频 + 令牌推进
+        if cross:
+            self.chapter_idx = ci        # 跨章：先换章再定位（位置须在渲染前给好）
+            self.char_offset = off
+            self._render_chapter()
+            # 跨章渲染必须立刻落地：不然连按时下一键算出来的还是旧章的行列，
+            # 高亮反复落在同一处，看起来就是"按了没反应"。
+            try:
+                self.text.update_idletasks()
+            except Exception:
+                pass
+            self._schedule_save()
+        else:
+            self.char_offset = off
+        self._jump_show(off)           # 高亮跟手
+        if self._jump_reading:
+            # 跨章时预取队列属于旧章，不能复用
+            self._jump_keep = not cross
+            self._jump_schedule()      # 只排一次，按最后位置开读
             self._set_tts_ui("playing")
-        else:
-            # 未朗读：仅跳转阅读位置
-            self._scroll_to_offset(off)
+        return "break"
+
+    def _jump_show(self, off):
+        """立刻把高亮 / 滚动 / 进度条挪到目标句（与朗读合成完全解耦）。"""
+        try:
+            content = self.book.chapters[self.chapter_idx].content
+            probe = content[off:off + 80]
+            ends = [probe.find(ch) for ch in "。！？!?…；;\n"]
+            ends = [p for p in ends if p >= 0]
+            if ends:
+                probe = probe[:min(ends) + 1]
+            self._highlight_sentence(self.chapter_idx, off, probe)
+        except Exception:
+            try:
+                self._scroll_to_offset(off)
+            except Exception:
+                pass
+        try:
             self._update_status()
             self._schedule_save()
-        return "break"
+        except Exception:
+            pass
+
+    def _sentence_offsets(self, ci):
+        """本章每句的原文起点，与朗读引擎逐句推进的位置完全一致。
+
+        引擎是按「纯净朗读文本」切句的，和按标点手算的结果并不相同；
+        跳句必须用同一套切句，否则「高亮的那一句」和「读出来的那一句」会对不上。
+        """
+        ch = self.book.chapters[ci]
+        key = (ci, id(ch), len(ch.content))
+        cached = getattr(self, "_sent_off_cache", None)
+        if cached and cached[0] == key:
+            return cached[1]
+        offs = []
+        try:
+            clean, cmap = ch.tts_content()
+            n = len(ch.content)
+            pos = 0
+            while pos < len(clean):
+                seg = clean[pos:]
+                frags = split_sentences(seg)
+                if not frags:
+                    break
+                t = frags[0]
+                s = seg.find(t)
+                if s < 0:
+                    break
+                offs.append(clean_to_orig(cmap, pos + s, n))
+                pos += s + len(t)
+        except Exception:
+            offs = []
+        if not offs:
+            # 兜底：拿不到引擎切句时退回按标点切（保证任何章节都能跳）
+            offs = self._punct_sentence_offsets(ch.content)
+        self._sent_off_cache = (key, offs)
+        return offs
+
+    @staticmethod
+    def _punct_sentence_offsets(content):
+        """按句末标点切句的兜底实现（引擎切句不可用时使用）。"""
+        n = len(content)
+        offs = [0]
+        off = 0
+        while off < n:
+            i = off
+            while i < n and content[i] not in "。！？!?…；;":
+                i += 1
+            if i >= n:
+                break
+            j = i + 1
+            while j < n and content[j] in " \t\r\n\u3000\u00a0":
+                j += 1
+            if j >= n or j == offs[-1]:
+                break
+            offs.append(j)
+            off = j
+        return offs
+
+    # ---- 快捷键跳句：按键即静音 → 高亮跟手 → 只按最后位置开一次会话 ----
+    # 连按期间每一键都同步静音并重排防抖；只有最后一次按键的位置会真正开会话。
+    _JUMP_DEBOUNCE_MS = 160
+    _jump_timer = None
+    _jump_reading = False
+    _jump_keep = True
+
+    def _jump_schedule(self):
+        """排期开读：取消上一次排期，只保留最后这次（连按十来下也只开一次会话）。"""
+        timer = getattr(self, "_jump_timer", None)
+        if timer:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
+        self._jump_timer = self.root.after(self._JUMP_DEBOUNCE_MS, self._do_jump_start)
+
+    def _do_jump_start(self):
+        """防抖到点：按当前（也就是最后一次按键的）位置开一次会话。"""
+        self._jump_timer = None
+        if not self.book or not self._jump_reading:
+            return
+        self._jump_reading = False
+        self._start_tts(self.book, self.chapter_idx, self.char_offset, keep_prefetch=True)
+        self._set_tts_ui("playing")
 
     def _has_any_book_cache(self):
         """检查是否有任何一本书存在整本缓存。"""

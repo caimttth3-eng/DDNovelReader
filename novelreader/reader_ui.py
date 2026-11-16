@@ -421,6 +421,14 @@ class ReaderMixin:
         was_active = self.tts.is_active()
         if was_active:
             self.tts.stop()  # 结束旧会话，避免旧章节状态冲突
+        self._jump_reading = False
+        timer = getattr(self, "_jump_timer", None)
+        if timer:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
+            self._jump_timer = None
         self.chapter_idx = ci
         self.char_offset = offset
         self._render_chapter()
@@ -454,8 +462,22 @@ class ReaderMixin:
             self._chapter_panel_visible = True
     def _handle_tts_event(self, evt):
         t = evt["type"]
+        # 唯一权威：事件必须属于当前会话令牌。跳句 / 停止会推进令牌，旧会话
+        # 回吐的开始/结束/停止事件天然作废——不需要 pending 窗口，也不需要
+        # 拿位置或时间去猜"这条事件是不是旧的"。
+        gen = evt.get("gen")
+        if gen is not None:
+            try:
+                if int(gen) != int(self.tts.current_gen):
+                    return
+            except Exception:
+                pass
         if t == "sentence_start":
             ci, off, text = evt["chapter_idx"], evt["char_offset"], evt["text"]
+            if ci == self.chapter_idx and off < self.char_offset:
+                # 位置只前进、不回拽：点按跳句时上一会话要等合成完才回吐 sentence_start，
+                # 若照单全收，它会把用户刚选的位置拉回旧句，看起来就是"按键没反应/卡住"。
+                return
             if ci != self.chapter_idx or self.book is None:
                 self.chapter_idx = ci
                 self.char_offset = off
@@ -470,6 +492,8 @@ class ReaderMixin:
                     pass
         elif t == "sentence_done":
             ci, off = evt["chapter_idx"], evt["char_offset"]
+            if ci == self.chapter_idx and off < self.char_offset:
+                return
             self.chapter_idx = ci
             self.char_offset = off
             self._update_status()
@@ -488,6 +512,8 @@ class ReaderMixin:
                 self._update_status()
                 self._save_now()
         elif t == "stopped":
+            # 旧会话的 stopped 已在令牌过滤处丢弃；能走到这里的停止事件属于当前会话，
+            # 就是用户真的停止朗读（或章节结束）。
             if not self.tts.is_active():
                 self._set_tts_ui("stopped")
                 self._clear_highlight()
@@ -530,19 +556,22 @@ class ReaderMixin:
         #   不能直接用 len(text) 定位结束。）
         end = start
         try:
-            total_len = len(text) + 30  # 显示文本可能多出标点，留足余量
-            line_end = self.text.index(f"{start} lineend")
-            window_end = self.text.index(f"{start}+{total_len}c")
-            # 取 start 到（行尾与 start+len 的较小者）之间的字符
-            probe_end = self.text.index(f"{start} lineend")
-            probe_end = self.text.index(f"{start}+{total_len}c") \
-                if self.text.compare(f"{start}+{total_len}c", "<", line_end) \
-                else line_end
+            # 在显示文本里从 start 向后扫，遇到句末标点即停。
+            # 窗口长度用 len(text)+40 估算（显示文本多出标点/空白），并钳到正文末位，
+            # 否则章末最后几句取窗会越界抛 TclError，整句落不上色。
+            limit = len(text) + 40
+            probe_end = self.text.index(f"{start}+{limit}c")
+            if self.text.compare(probe_end, ">", "end-1c"):
+                probe_end = "end-1c"
             window = self.text.get(start, probe_end)
+            found = False
             for i, ch in enumerate(window):
                 if ch in "。！？.!?；;\n":
                     end = self.text.index(f"{start}+{i+1}c")
+                    found = True
                     break
+            if not found and self.text.compare(probe_end, ">", start):
+                end = probe_end
         except Exception:
             end = start
         self.text.tag_remove("tts", "1.0", "end")

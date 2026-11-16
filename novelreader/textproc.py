@@ -64,33 +64,67 @@ def _is_sent_end(ch):
     return ch in _SENT_END
 
 
+# 有朗读价值的最小字符集：中日韩文字 / 假名 / 谚文 / 字母 / 数字
+_READABLE_RE = re.compile(
+    "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7afA-Za-z0-9]"
+)
+# 行尾连续出现的装饰性符号（如 -------------、====、***），不构成朗读内容
+_TAIL_DECOR_RE = re.compile(r"[=\-_~*#·—]{3,}\s*$")
+
+
+def _strip_decor_lines(content):
+    """剔除装饰/分隔行，返回 (过滤后文本, 过滤文本下标 → 原文下标)。
+
+    网文正文常在章末挂一行分隔符（如 `------------`）。这类行不含任何可读字符，
+    却会被切成“一句”送去合成：产出音频仅几十毫秒，而合成要花掉一次完整网络往返，
+    正好把预取队列在这一位置抽干 → 自动跨章时出现一次可感知空档。
+    """
+    out = []
+    idx = array("I")
+    pos = 0
+    n = len(content)
+    while pos < n:
+        nl = content.find("\n", pos)
+        end = n if nl < 0 else nl
+        line = content[pos:end]
+        m = _TAIL_DECOR_RE.search(line)
+        keep_len = m.start() if m else len(line)
+        if _READABLE_RE.search(line[:keep_len]):
+            out.append(line[:keep_len])
+            idx.extend(range(pos, pos + keep_len))
+        pos = end + 1
+    return "".join(out), idx
+
+
 def preprocess_for_tts(content):
     """把原文清洗为 TTS 朗读文本，并返回「纯净下标 → 原文下标」映射表。
 
     规则：
-    1. 删除所有空白（空格/制表/换行/全角空格/零宽字符等）；
-    2. 删除 emoji 与颜文字/装饰符号；
-    3. 连续标点折叠为一个：优先保留运行中的句子终止符（如“。！？”保留一个
+    1. 删除装饰/分隔行（整行无可读字符，如 `------------`），不送去合成；
+    2. 删除所有空白（空格/制表/换行/全角空格/零宽字符等）；
+    3. 删除 emoji 与颜文字/装饰符号；
+    4. 连续标点折叠为一个：优先保留运行中的句子终止符（如“。！？”保留一个
        终止符），否则保留第一个标点——避免 TTS 长时间静音，同时保住句子停顿。
 
     返回：
         (clean_text: str, cmap: array('I'))
     """
+    content, base = _strip_decor_lines(content)
     out = []
     cmap = array("I")
     n = len(content)
     i = 0
     while i < n:
         ch = content[i]
-        # 1. 空白 → 删除
+        # 0. 空白 → 删除
         if _is_ws(ch):
             i += 1
             continue
-        # 2. emoji / 颜文字 / 装饰符号 → 删除
+        # 1. emoji / 颜文字 / 装饰符号 → 删除
         if _is_emoji(ch) or _is_decor_symbol(ch):
             i += 1
             continue
-        # 3. 连续标点折叠
+        # 2. 连续标点折叠
         if _is_punct(ch):
             j = i + 1
             while j < n and (
@@ -107,12 +141,12 @@ def preprocess_for_tts(content):
             if keep < 0:
                 keep = i
             out.append(content[keep])
-            cmap.append(keep)
+            cmap.append(base[keep])
             i = j
             continue
         # 普通字符保留
         out.append(ch)
-        cmap.append(i)
+        cmap.append(base[i])
         i += 1
     return "".join(out), cmap
 

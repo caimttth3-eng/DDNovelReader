@@ -51,6 +51,7 @@ try:
 except Exception:  # pragma: no cover
     pyttsx3 = None
 from .textproc import clean_to_orig, orig_to_clean
+from .audio_bus import AudioBus, SessionClock
 
 _SENT_END = re.compile(r"(?<=[。！？!?；;])")
 
@@ -444,8 +445,15 @@ class _EdgePrefetch:
         self._queue = queue.Queue(maxsize=limit)
         self._lock = threading.Lock()
         self._next_off = start_off
+        self.consumed_ci = ci         # 已被播放取走的句子所在章节
+        self.consumed_off = start_off   # 已被播放取走的句子结束位置（= 下一句起点）
+        self._written_off = start_off   # 生产者已推进到的位置
+        self._written_ci = ci
         self._stopped = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
+
+    def stopped(self):
+        return self._stopped.is_set()
 
     def _run(self):
         try:
@@ -460,16 +468,20 @@ class _EdgePrefetch:
                         ci += 1
                         content, _cmap = self._chapters[ci].tts_content()
                         off = 0
+                        self._written_ci = ci
                         continue
                     break
+                start = off
                 off = nxt
+                self._written_off = nxt
+                self._written_ci = ci
                 try:
                     audio = self._synth(text)
                 except Exception:
                     audio = None
                 if audio is None:
                     continue
-                item = (text, audio)
+                item = (text, audio, start, nxt, ci)
                 while not self._stopped.is_set():
                     try:
                         self._queue.put(item, timeout=0.5)
@@ -480,11 +492,17 @@ class _EdgePrefetch:
             pass
 
     def get(self, timeout=None):
-        """取一句已预取的音频，返回 (text, audio)；超时返回 None。"""
+        """取一句已预取的音频，返回 (text, audio, 句起点, 句终点, 章节)；超时返回 None。"""
         try:
-            return self._queue.get(timeout=timeout)
+            item = self._queue.get(timeout=timeout)
         except queue.Empty:
             return None
+        try:
+            self.consumed_off = item[3]
+            self.consumed_ci = item[4]
+        except Exception:
+            pass
+        return item
 
     def close(self):
         self._stopped.set()
@@ -892,7 +910,13 @@ class SpeechController:
         self._book = None
         self._ci = 0
         self._off = 0
-        self._gen = 0  # 会话代号：每次 start 自增
+        self._gen = 0  # 兼容保留：会话代号（真实权威见 _clock）
+        # 重写后的链路：令牌时钟是唯一的"第几次开读"权威，音频走唯一输出通道。
+        self._clock = SessionClock()
+        self._bus = AudioBus(
+            _player_open, _player_play, _player_pause, _player_resume,
+            _player_stop, _player_close, _player_playing, _player_set_volume,
+        )
         self._queue = queue.Queue()
         self._pending_voice = None  # SAPI 语音
         self._applied_voice = None
@@ -904,6 +928,8 @@ class SpeechController:
         self._external_voice = None
         self._edge_prefetch = None
         self._edge_fail_posted = False
+        self._volume = 100  # 音量权威值（0-100）；bus 播放时按它下发
+        self._book_id = "book"  # 当前书 id（整本缓存/统计用；start 前必须已就位）
         # 多人有声（句子级音色切换）：仅 Edge 后端生效
         self._multi_roles = None       # {角色名: voice_id}；None=未启用
         self._multi_dialogues = None   # 当前章对白区间表 {ci: [[start,end,role],...]}
@@ -926,8 +952,18 @@ class SpeechController:
         self._hist_check_worker = None
 
     # ---------- 事件 ----------
-    def _post(self, evt):
+    def _post(self, evt, gen=None):
+        """所有事件都带会话令牌：UI 只接受当前令牌的事件，旧会话的事件自然作废。"""
+        try:
+            evt.setdefault("gen", int(gen) if gen is not None else self._clock.current)
+        except Exception:
+            evt["gen"] = gen
         self._queue.put(evt)
+
+    @property
+    def current_gen(self):
+        """当前有效的会话令牌（UI / 事件过滤用）。"""
+        return self._clock.current
 
     def drain(self):
         out = []
@@ -1042,6 +1078,10 @@ class SpeechController:
                 _mci_set_volume(self._volume)
             except Exception:
                 pass
+        try:
+            self._bus.set_volume(self._volume)
+        except Exception:
+            pass
 
     def get_volume(self):
         return self._volume
@@ -1584,13 +1624,21 @@ class SpeechController:
         return out
 
     # ---------- 控制（GUI 线程调用） ----------
-    def start(self, book, chapter_idx, char_offset):
+    def start(self, book, chapter_idx, char_offset, keep_prefetch=False):
+        """开始 / 续读：拿一个新令牌，旧令牌的一切后续动作立即作废。
+
+        keep_prefetch=True 时保留已合成好的预取队列（跳句时目标句常常就在队列里，
+        拿到即可出声，不必重新合成）。
+        """
         self._ensure_thread()
+        token = self._clock.next()
+        # 接管音频输出：先同步静音上一个流，再交给新令牌。旧会话此后无法再开播。
+        self._bus.accept(token)
         with self._cv:
             self._book = book
             self._ci = int(chapter_idx)
             self._off = int(char_offset)
-            self._gen += 1
+            self._gen = token
             self._state = "playing"
             self._cv.notify_all()
 
@@ -1599,18 +1647,70 @@ class SpeechController:
             if self._state == "playing":
                 self._state = "paused"
                 self._cv.notify_all()
+        self._bus.pause()
 
     def resume(self):
         with self._cv:
             if self._state == "paused":
                 self._state = "playing"
                 self._cv.notify_all()
+        self._bus.resume()
+
+    def _silence_now(self):
+        """同步静音：所有后端都在"调用它的这个线程"里立刻停下。
+
+        - Edge / external / 系统语音：音频统一由 AudioBus 播放（pygame 进程级，跨线程安全），
+          直接 stop + 释放媒体即可立刻消音；
+        - SAPI 的 pyttsx3 引擎不能从这里调 stop()：实测会阻塞 UI 线程约 500ms，
+          反而让按键手感更差。系统语音改成"先合成到文件、再交给 bus 播"，所以
+          这里不需要碰引擎。
+        """
+        try:
+            self._bus.stop_now()
+        except Exception:
+            pass
 
     def stop(self):
+        """用户停止朗读：令牌推进 + 同步静音 + 关闭预取队列。"""
+        token = self._clock.next()
+        self._silence_now()
         with self._cv:
             self._book = None
             self._state = "idle"
+            self._gen = token
             self._cv.notify_all()
+        pf = self._edge_prefetch
+        self._edge_prefetch = None
+        if pf is not None:
+            try:
+                pf.close()
+            except Exception:
+                pass
+        self._post({"type": "stopped"})
+
+    def halt_for_jump(self):
+        """快捷键跳句：按键瞬间同步静音，并把令牌推进一代。
+        与 stop() 的区别：这里保留已经合成好的预取队列（跳句目标句往往就在里面），
+        也不发 stopped 事件——跳句不是"用户停止朗读"。旧会话的令牌随之作废，
+        它的合成结果、开播请求、事件在链路上全部被拒。
+        """
+        token = self._clock.next()
+        self._silence_now()
+        with self._cv:
+            self._book = None
+            self._state = "idle"
+            self._gen = token
+            self._cv.notify_all()
+        # 跳句必须关掉旧的预取队列：它按旧位置顺序合成，目标句几乎永远不在队首，
+        # 留着只会让每次点按都多留一个合成线程（线程与请求越积越多 → 界面卡顿、
+        # 到最后停在原地不出声）。新位置由新会话自己重开预取。
+        pf = self._edge_prefetch
+        self._edge_prefetch = None
+        if pf is not None:
+            try:
+                pf.close()
+            except Exception:
+                pass
 
     def _ensure_thread(self):
         if self._thread is not None and self._thread.is_alive():
@@ -1629,6 +1729,7 @@ class SpeechController:
         if self._ready is not None:
             self._ready.set()
         try:
+            last = None
             while True:
                 with self._cv:
                     while self._book is None:
@@ -1638,6 +1739,12 @@ class SpeechController:
                     off = self._off
                     gen = self._gen
                     self._state = "playing"
+                    # 同一个会话刚刚已经跑完（合成/播放失败退出）时不要再原地重跑：
+                    # 否则会死循环重试同一句，把 CPU 和合成请求都打满，界面表现为卡死。
+                    if (gen, ci, off) == last:
+                        self._cv.wait(0.15)
+                        continue
+                    last = (gen, ci, off)
                 self._run_session(book, ci, off, gen)
         except Exception as e:  # pragma: no cover
             self._post({"type": "error", "message": f"朗读出错：{e}"})
@@ -1652,7 +1759,9 @@ class SpeechController:
             try:
                 self._coinit_com()
                 self._engine = pyttsx3.init()
-                self._engine.startLoop(useDriverLoop=False)
+                # 注意：这里绝不能 startLoop()。系统语音已改为 save_to_file + runAndWait
+                # 合成到文件（再由 AudioBus 播放），而 runAndWait 在已 startLoop 的引擎上
+                # 会抛 "run loop already started"。
             except Exception as e:
                 self._sapi_err = repr(e)
                 self._engine = None
@@ -1685,12 +1794,17 @@ class SpeechController:
 
     def _should_stop(self, gen):
         with self._cv:
-            return self._state == "idle" or self._book is None or self._gen != gen
+            return (self._state == "idle" or self._book is None
+                    or self._clock.current != gen)
 
     # ---------- 朗读会话 ----------
     def _run_session(self, book, ci, off, gen):
+        """一次朗读会话。只在当前令牌下执行；令牌一变，所有写操作立即失败。
+
+        预取队列不在这里关闭、也不在会话之间"转让"——它只由 stop() 关闭，
+        会话自己决定"是继续用还是丢掉重建"，因此不存在两个会话互相关队列的问题。
+        """
         chapters = book.chapters
-        self._edge_prefetch = None
         self._edge_fail_posted = False
         try:
             while True:
@@ -1702,7 +1816,7 @@ class SpeechController:
                         continue
                 self._sync_props()
                 if ci >= len(chapters):
-                    self._post({"type": "finished"})
+                    self._post({"type": "finished"}, gen)
                     with self._cv:
                         self._book = None
                         self._state = "idle"
@@ -1717,7 +1831,7 @@ class SpeechController:
                 if clean_off >= len(clean_text):
                     ci += 1
                     off = 0
-                    self._post({"type": "chapter", "chapter_idx": ci})
+                    self._post({"type": "chapter", "chapter_idx": ci}, gen)
                     continue
                 text, next_clean, sent_start = self._next_chunk(clean_text, clean_off)
                 if not text:
@@ -1736,10 +1850,14 @@ class SpeechController:
                         "chapter_idx": ci,
                         "char_offset": orig_off,
                         "text": text,
-                    }
+                    },
+                    gen,
                 )
                 if self._backend in ("edge", "external"):
-                    ok = self._speak_edge(text, gen, ci, orig_off, clean_text, next_clean, chapters)
+                    ok = self._speak_edge(
+                        text, gen, ci, orig_off, clean_text, next_clean, chapters,
+                        actual_clean_off,
+                    )
                 else:
                     ok = self._speak_sapi(text, gen)
                 if not ok:
@@ -1753,7 +1871,8 @@ class SpeechController:
                         continue
                 next_orig = clean_to_orig(cmap, next_clean, len(orig_content))
                 self._post(
-                    {"type": "sentence_done", "chapter_idx": ci, "char_offset": next_orig}
+                    {"type": "sentence_done", "chapter_idx": ci, "char_offset": next_orig},
+                    gen,
                 )
                 # 句子之间停顿（默认 0.10s），增强朗读节奏
                 with self._cv:
@@ -1762,13 +1881,8 @@ class SpeechController:
                     time.sleep(gap)
                 off = next_orig
         finally:
-            if self._edge_prefetch is not None:
-                try:
-                    self._edge_prefetch.close()
-                except Exception:
-                    pass
-                self._edge_prefetch = None
-            self._post({"type": "stopped"})
+            # 预取队列不归会话所有：它由 stop() 关闭，跳句时保留给下一个会话复用。
+            self._post({"type": "stopped"}, gen)
 
     @staticmethod
     def _next_chunk(content, offset):
@@ -1784,8 +1898,13 @@ class SpeechController:
 
     # ---------- SAPI 后端 ----------
     def _speak_sapi(self, text, gen, fallback=False):
-        """系统语音朗读一句，阻塞到结束或被暂停/停止打断。
-        fallback=True：Edge 联网失败后的回退朗读——系统语音不可用时跳过本句继续，不终止整本。"""
+        """系统语音朗读一句：先合成到临时 WAV，再交给 AudioBus 播放。
+
+        不再用 pyttsx3 的实时 say()/iterate() 直接出声——那条路径既不能在按键瞬间
+        停下（轮询要等 ~500ms，主线程直接 stop() 又会阻塞 UI 半秒），也无法和新链路的
+        令牌/同步静音统一。合成到文件后播出，静音就走 AudioBus，按键立刻生效。
+        fallback=True：Edge 联网失败后的回退——系统语音不可用时跳过本句继续，不终止整本。
+        """
         if not text:
             return False
         self._ensure_engine()
@@ -1809,36 +1928,33 @@ class SpeechController:
                     {"type": "error", "message": "联网语音与系统语音均不可用，本句已跳过"}
                 )
             return True
-        done = threading.Event()
-
-        def _on_finished(name=None, completed=None, **kw):
-            done.set()
-
+        if self._should_stop(gen):
+            return False
+        self._sync_props()
+        tmp_path = None
         try:
-            self._engine.connect("finished-utterance", _on_finished)
-            self._engine.say(text)
-            while not done.is_set():
-                if self._should_stop(gen):
-                    self._engine.stop()  # 停止/切书：同线程打断
-                    break
-                with self._cv:
-                    if self._state == "paused":
-                        self._engine.stop()  # 暂停：同线程打断
-                        break
-                try:
-                    self._engine.iterate()
-                except Exception:
-                    break
-                done.wait(0.02)
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            self._engine.save_to_file(text, tmp_path)
+            self._engine.runAndWait()
+            if self._should_stop(gen):
+                return False
+            try:
+                if os.path.getsize(tmp_path) < 512:
+                    return True  # 引擎没吐出音频：跳过本句继续读，不中断整本
+            except OSError:
+                return True
+            return self._play_audio_file(tmp_path, gen)
         except Exception as e:
             self._post({"type": "error", "message": f"朗读出错：{e}"})
             return False
         finally:
-            try:
-                self._engine.disconnect({"topic": "finished-utterance", "cb": _on_finished})
-            except Exception:
-                pass
-        return True
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
     # ---------- Edge 后端 ----------
     def _edge_synthesize(self, text):
@@ -1852,53 +1968,87 @@ class SpeechController:
             return audio
         return synth_audio(text, voice, rate)
 
-    def _speak_edge(self, text, gen, ci, off, content, next_off, chapters):
-        """Edge 语音：整本缓存命中直接播放；否则批量预取/按需合成；失败回退系统语音。
+    def _take_prefetched(self, pf, text, ci, cl_off, gen, deadline):
+        """从预取队列里取到当前句的音频，返回 (audio, need_rebuild)。
+
+        正常续读时队首就是当前句，取到即用（零等待）；快捷键往后跳句时，队列里
+        夹着中间几句，能直接丢弃就用，丢掉的目标句不在队列里则立刻重建——
+        绝不为了一句去等生产线程把中间每句都合成一遍（那样跳 6 句要等 6 次合成）。
+        位置比较必须带章节号：章节切换时 clean 偏移会归 0，只看偏移会误判为倒退。
+        """
+        while True:
+            if self._should_stop(gen):
+                return None, True
+            if cl_off is not None and (pf.consumed_ci, pf.consumed_off) > (ci, cl_off):
+                return None, True          # 队列已越过目标句（目标在前方）→ 重建
+            at_head = cl_off is None or (pf.consumed_ci, pf.consumed_off) == (ci, cl_off)
+            item = pf.get(timeout=0.05 if at_head else 0)
+            if item is None:
+                if pf.stopped():
+                    return None, True
+                if not at_head:
+                    return None, True      # 队列里没有目标句 → 重建比干等更快
+                if time.time() > deadline:
+                    return None, True      # 队首迟迟不产出（网络慢）→ 自己合成
+                continue
+            ptext, paudio, pstart, _pn, pci = item[0], item[1], item[2], item[3], item[4]
+            if ptext == text and pci == ci:
+                return paudio, False
+            if cl_off is not None and (pci, pstart) > (ci, cl_off):
+                return None, True          # 已越过目标句（文本切分不一致）→ 重建
+
+    def _speak_edge(self, text, gen, ci, off, content, next_off, chapters, cl_off=None):
+        """Edge 语音：整本缓存命中直接播放；否则复用预取/现场合成；失败回退系统语音。
         多人有声模式逐句独立音色，禁用批量预取（音色随句变化，预取会串音色）。"""
         cached = self._cached_audio(ci, off) if self._backend in ("edge", "external") else None
         if cached:
             return self._speak_edge_play(cached, gen)
         multi_mode = self._multi_roles is not None
+        audio = None
         if multi_mode:
             # 多人有声：逐句直接合成（按 _cur_voice 独立音色）
             try:
                 audio = self._edge_synthesize(text)
             except Exception:
                 audio = None
-        elif self._edge_prefetch is None:
-            # 首句：直接生成，同时启动后续最多 30 句的批量预取
-            try:
-                audio = self._edge_synthesize(text)
-            except Exception:
-                audio = None
-            self._edge_prefetch = _EdgePrefetch(
-                self._edge_synthesize, chapters, ci, content, next_off, _EdgePrefetch.MAX_AHEAD
-            )
         else:
-            audio = None
-            item = None
-            try:
-                item = self._edge_prefetch.get(timeout=10)
-            except Exception:
-                item = None
-            if item:
-                ptext, paudio = item
-                if ptext == text:
-                    audio = paudio
+            pf = self._edge_prefetch
+            if pf is not None and pf.stopped():
+                self._edge_prefetch = None
+                pf = None
+            if pf is not None:
+                audio, rebuild = self._take_prefetched(
+                    pf, text, ci, cl_off, gen, time.time() + 8
+                )
+                if rebuild:
+                    # 队列用不上（目标在前方 / 越过目标）：丢掉重建。
+                    # 但只在本会话仍持有令牌时关闭——已被跳句顶替的旧会话不能动
+                    # 队列，留给新位置的新会话自己判断。
+                    if self._clock.current == gen:
+                        try:
+                            pf.close()
+                        except Exception:
+                            pass
+                        if self._edge_prefetch is pf:
+                            self._edge_prefetch = None
             if audio is None:
-                # 预取未就绪（网络慢）或句序失配（罕见竞态）：直接生成本句
+                # 现场合成当前句；同时立刻启动后续预取（并行，不再串行等合成完再预取）
+                # 先关掉可能还活着的旧队列：同一时刻只允许一个预取线程在跑，
+                # 否则点按跳句时每个会话都会新增一个合成线程，越积越多。
+                old = self._edge_prefetch
+                if old is not None:
+                    try:
+                        old.close()
+                    except Exception:
+                        pass
+                self._edge_prefetch = _EdgePrefetch(
+                    self._edge_synthesize, chapters, ci, content, next_off,
+                    _EdgePrefetch.MAX_AHEAD,
+                )
                 try:
                     audio = self._edge_synthesize(text)
                 except Exception:
                     audio = None
-                # 重建预取缓冲，保证后续句仍从正确位置预取
-                try:
-                    self._edge_prefetch.close()
-                except Exception:
-                    pass
-                self._edge_prefetch = _EdgePrefetch(
-                    self._edge_synthesize, chapters, ci, content, next_off, _EdgePrefetch.MAX_AHEAD
-                )
         if audio:
             return self._speak_edge_play(audio, gen)
         # 联网失败：回退系统语音（仅提示一次）
@@ -1907,16 +2057,20 @@ class SpeechController:
             self._post(
                 {"type": "error", "message": "联网语音生成失败，正在尝试系统语音"}
             )
-        try:
-            self._edge_prefetch.close()
-        except Exception:
-            pass
-        self._edge_prefetch = None
+        pf = self._edge_prefetch
+        if pf is not None and self._clock.current == gen:
+            try:
+                pf.close()
+            except Exception:
+                pass
+            self._edge_prefetch = None
         return self._speak_sapi(text, gen, fallback=True)
 
     def _speak_edge_play(self, audio, gen):
-        """用平台播放器播放预生成的 MP3（Windows=MCI，macOS/Linux=pygame），支持暂停/停止。"""
+        """把一句音频字节写成临时文件，交给唯一的播放函数。"""
         if not audio:
+            return False
+        if self._should_stop(gen):
             return False
         audio = _trim_edge_silence(audio)  # 裁句首尾静音（停顿=0 时句间接近无缝）
         tmp_path = None
@@ -1927,38 +2081,45 @@ class SpeechController:
             tmp.write(audio)
             tmp.flush()
             tmp.close()
-            _player_open(tmp_path)
-            _player_set_volume(self._volume)
-            _player_play()
-            while _player_playing():
-                with self._cv:
-                    if self._state == "idle" or self._book is None or self._gen != gen:
-                        _player_stop()
-                        break
-                    if self._state == "paused":
-                        _player_pause()
-                        self._cv.wait()
-                        if self._state == "idle" or self._book is None or self._gen != gen:
-                            _player_stop()
-                            break
-                        _player_resume()
-                time.sleep(0.03)
-            _player_close()
-            return True
-        except Exception as e:
-            self._post({"type": "error", "message": f"播放出错：{e}"})
-            return False
+            return self._play_audio_file(tmp_path, gen)
         finally:
-            try:
-                _player_stop()
-                _player_close()
-            except Exception:
-                pass
             if tmp_path:
                 try:
                     os.unlink(tmp_path)
                 except Exception:
                     pass
+
+    def _play_audio_file(self, path, gen):
+        """唯一播放函数（Edge / GPT-SoVITS / 系统语音共用）。
+
+        令牌过期（用户又按了一次键 / 停止朗读）时连媒体都不打开，绝不会有旧句在新
+        位置开读前闪一下声音；播放期间的暂停/停止也由令牌与状态统一裁决。
+        """
+        if not path or self._should_stop(gen):
+            return False
+        try:
+            if not self._bus.play(path, gen, self._volume):
+                return False
+            while self._bus.playing():
+                if self._should_stop(gen):
+                    self._bus.stop_now()
+                    break
+                with self._cv:
+                    if self._state == "paused":
+                        self._bus.pause()
+                        self._cv.wait()
+                        if self._should_stop(gen):
+                            self._bus.stop_now()
+                            break
+                        self._bus.resume()
+                time.sleep(0.02)
+            self._bus.stop_now()
+            return True
+        except Exception as e:
+            self._post({"type": "error", "message": f"播放出错：{e}"})
+            return False
+        finally:
+            self._bus.stop_now()
 
 
 def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
@@ -2098,63 +2259,45 @@ def _mci_playing():
     return mode in ("playing", "paused")
 
 
-# ---------- 跨平台播放器分发（Windows=MCI / macOS/Linux=pygame） ----------
+# ---------- 跨平台播放器分发（统一 pygame.mixer.music） ----------
+# 2026-11-16：Windows 原先走 MCI，但 MCI 的设备别名绑定在**调用线程**上——
+# 主线程（UI）发 "stop/close" 会直接返回 263 无效设备，停止命令实际不生效，
+# 这正是"按 ←/→ 语音不停"的根因之一。pygame.mixer.music 是进程级状态，
+# 任何线程都能立刻 stop/pause，因此三个平台统一用它作为唯一播放通道。
 _IS_WINDOWS = sys.platform.startswith("win")
 
 
 def _player_open(path):
-    if _IS_WINDOWS:
-        _mci_open(path)
-    else:
-        _pp_open(path)
+    _pp_open(path)
 
 
 def _player_set_volume(v):
+    _pp_set_volume(v)
     if _IS_WINDOWS:
-        _mci_set_volume(v)  # MCI 层音量（回退）
-        _set_process_volume(v)  # Core Audio 进程音量（主要）
-    else:
-        _pp_set_volume(v)
+        _set_process_volume(v)  # 进程音量（pycaw 可用时）：让整体音量跟随滑杆
 
 
 def _player_play():
-    if _IS_WINDOWS:
-        _mci_play()
-    else:
-        _pp_play()
+    _pp_play()
 
 
 def _player_pause():
-    if _IS_WINDOWS:
-        _mci_pause()
-    else:
-        _pp_pause()
+    _pp_pause()
 
 
 def _player_resume():
-    if _IS_WINDOWS:
-        _mci_resume()
-    else:
-        _pp_resume()
+    _pp_resume()
 
 
 def _player_stop():
-    if _IS_WINDOWS:
-        _mci_stop()
-    else:
-        _pp_stop()
+    _pp_stop()
 
 
 def _player_close():
-    if _IS_WINDOWS:
-        _mci_close()
-    else:
-        _pp_close()
+    _pp_close()
 
 
 def _player_playing():
-    if _IS_WINDOWS:
-        return _mci_playing()
     return _pp_playing()
 
 
