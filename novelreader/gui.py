@@ -214,6 +214,9 @@ class NovelReaderBase:
             self._shelf_size_cache = {}  # bid -> size_bytes
             self._shelf_size_worker = None
             self._shelf_size_stop = threading.Event()
+            self._shelf_size_wake = threading.Event()  # 唤醒常驻大小线程
+            self._shelf_size_queue = queue.Queue()     # worker -> 主线程的结果队列
+            self._shelf_poll_id = None                 # 主线程轮询 after id
     def _migrate_tts_cache_bg(self):
         """启动后台一次性任务：迁移旧音频缓存目录结构 + 校准大小索引。
 
@@ -240,36 +243,78 @@ class NovelReaderBase:
                 pass
         threading.Thread(target=worker, daemon=True).start()
     def _refresh_shelf_sizes_async(self):
-        """后台线程计算书架中所有书籍的缓存大小，完成后逐行更新 Treeview。"""
+        """请求后台刷新书架里各书的缓存大小（不阻塞主线程）。
+
+        旧实现每次刷新都「置停止标志 + join(timeout=0.05) + 新建线程」：
+        主线程实测被 join 吃掉 50~60ms，且新旧线程同时全量重写 library.json
+        会互相打断（走 0.12s 重试）。现改为单个常驻 worker + 唤醒事件：
+        刷新请求只 set 事件立即返回，worker 扫完一轮后在后台批量落盘一次；
+        UI 更新一律经队列由主线程轮询执行（跨线程直接调 root.after 会卡住 Tcl）。
+        """
         self._init_shelf_size_cache()
-        # 如果已有 worker 在运行，标记停止但只短暂等待（旧 worker 是 daemon，
-        # 由 stop 标记自然退出），避免每次刷新书架阻塞主线程等它
-        if self._shelf_size_worker and self._shelf_size_worker.is_alive():
-            self._shelf_size_stop.set()
-            self._shelf_size_worker.join(timeout=0.05)
-        self._shelf_size_stop.clear()
+        if getattr(self, "_shelf_size_worker", None) is None or not self._shelf_size_worker.is_alive():
+            self._shelf_size_stop.clear()
+            self._shelf_size_worker = threading.Thread(target=self._shelf_size_loop, daemon=True)
+            self._shelf_size_worker.start()
+        if getattr(self, "_shelf_poll_id", None) is None:
+            self._shelf_poll_id = self.root.after(300, self._poll_shelf_sizes)
+        self._shelf_size_wake.set()
 
-        books = self.storage.all_books()
-        # 全部书快速刷新：音频大小读索引、文本大小单文件 getsize，零扫盘，因此每次刷新都精确
-        bids = list(books.keys())
-        if not bids:
-            return
+    def _poll_shelf_sizes(self):
+        """主线程轮询队列：把 worker 算好的大小写进单元格，然后重新挂起自己。"""
+        self._shelf_poll_id = None
+        try:
+            got = False
+            while True:
+                bid, sz = self._shelf_size_queue.get_nowait()
+                self._shelf_size_cache[bid] = sz
+                self._update_shelf_size_cell(bid, sz)
+                got = True
+        except queue.Empty:
+            pass
+        except Exception:
+            pass
+        if not self._shelf_size_stop.is_set():
+            try:
+                self._shelf_poll_id = self.root.after(200 if not got else 0, self._poll_shelf_sizes)
+            except Exception:
+                self._shelf_poll_id = None
 
-        def worker():
-            for bid in bids:
-                if self._shelf_size_stop.is_set():
-                    return
-                try:
-                    sz = self._book_total_cache_size(bid)
-                    self.storage.set_book_cache_size(bid, sz)
-                    self._shelf_size_cache[bid] = sz
-                    # 通过 root.after 回到主线程更新 UI
-                    self.root.after(0, lambda b=bid, s=sz: self._update_shelf_size_cell(b, s))
-                except Exception:
-                    pass
-
-        self._shelf_size_worker = threading.Thread(target=worker, daemon=True)
-        self._shelf_size_worker.start()
+    def _shelf_size_loop(self):
+        """常驻线程：等唤醒 → 逐本算大小 → 结果入队 → 批量落盘一次。"""
+        while True:
+            self._shelf_size_wake.wait()
+            self._shelf_size_wake.clear()
+            if self._shelf_size_stop.is_set():
+                return
+            try:
+                bids = list(self.storage.all_books().keys())
+                if not bids:
+                    continue
+                changed = False
+                for bid in bids:
+                    if self._shelf_size_stop.is_set():
+                        return
+                    try:
+                        sz = self._book_total_cache_size(bid)
+                    except Exception:
+                        continue
+                    try:
+                        cur = int(self.storage.data["books"][bid].get("cache_size", -1))
+                    except Exception:
+                        cur = -1
+                    # 只写内存数据 + 入队，不碰 Tk，也不逐本落盘
+                    self.storage.set_book_cache_size(bid, sz, save=False)
+                    self._shelf_size_queue.put((bid, sz))
+                    if cur != int(sz):
+                        changed = True
+                if changed:
+                    try:
+                        self.storage.save()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
     def _update_shelf_size_cell(self, bid, size):
         """更新 Treeview 中某本书的大小列。"""
         try:
@@ -1005,6 +1050,15 @@ class NovelReaderBase:
         # 卸载多媒体键子类化，避免窗口销毁后残留回调
         try:
             self._on_media_keys_destroy()
+        except Exception:
+            pass
+        # 让常驻大小线程退出（daemon，唤醒一次即可自行返回），并停掉主线程轮询
+        try:
+            self._shelf_size_stop.set()
+            self._shelf_size_wake.set()
+            if getattr(self, "_shelf_poll_id", None):
+                self.root.after_cancel(self._shelf_poll_id)
+                self._shelf_poll_id = None
         except Exception:
             pass
         self.root.destroy()

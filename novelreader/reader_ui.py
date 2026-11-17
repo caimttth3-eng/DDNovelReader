@@ -404,16 +404,18 @@ class ReaderMixin:
         if not self.current_bid or not self.book:
             return
         pct = self._compute_percent(self.chapter_idx, self.char_offset)
-        self.storage.update_progress(
+        # 位置 + 上次书 合并成一次落盘（原来分两次 = 两次全量 JSON 重写）
+        self.storage.save_reading_state(
             self.current_bid,
             {
                 "chapter_idx": self.chapter_idx,
                 "char_offset": self.char_offset,
                 "percent": round(pct, 3),
             },
+            self.current_bid,
         )
-        self.storage.set_setting("last_book", self.current_bid)
-        self._refresh_bookshelf()
+        # 只更新书架里本书那一行，不再整表重建（重建会让主线程多花 50~60ms）
+        self._update_shelf_progress(self.current_bid, pct)
     def _goto_chapter(self, ci, offset=0):
         if not self.book:
             return

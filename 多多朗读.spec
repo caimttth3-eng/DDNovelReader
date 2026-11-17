@@ -77,10 +77,10 @@ if _tkinter_pkg:
 _is_tcl9 = _tcl_dll and os.path.basename(_tcl_dll).startswith("tcl9")
 if _is_tcl9:
     _tcl_scripts = _tk_scripts = None
-if _tcl_scripts:
-    _datas.append((_tcl_scripts, 'tcl8.6'))
-if _tk_scripts:
-    _datas.append((_tk_scripts, 'tk8.6'))
+# v2.2.7：不再重复打包 tcl8.6 / tk8.6 脚本库。
+# PyInstaller 的 tkinter 运行时钩子已经生成同内容的 _tcl_data（843 文件 3.20MB）与 _tk_data（0.78MB），
+# 并用 TCL_LIBRARY/TK_LIBRARY 指向它们；此处再塞一份同名副本纯属重复（3.20 + 1.49MB）。
+# 实测：删掉副本后的 onedir 副本仍能正常创建主窗口并渲染正文。
 
 # --- 组装 binaries（二进制/DLL）---
 _binaries = []
@@ -112,6 +112,9 @@ _hiddenimports = [
     # python-docx 依赖 lxml（C 扩展），PyInstaller 偶发漏收集，
     # 显式强制收集，否则打包后 .docx 书籍解析功能不可用
     'docx', 'lxml', 'lxml.etree', 'lxml.objectify', 'lxml.html',
+    # v2.2.7 起 docx/mobi/edge_tts/pycaw 改为函数内惰性导入（缩短启动导入链），
+    # 这里显式收集 mobi 作双保险，避免打包漏收导致 mobi/azw3 解析失效
+    'mobi',
 ]
 
 # --- excludes：排除用不到的标准库/测试模块，进一步瘦身 ---
@@ -138,6 +141,24 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# --- 包体裁剪（v2.2.7，实测 87.1MB → 73.8MB）---
+# PIL 的 AVIF / WEBP / 色彩管理插件与 libwebp：程序只读 PNG / ICO 资源（assets 里没有 .avif/.webp），
+# JPEG 封面由 _imaging 核心解码，不需要这些额外编解码器——单 AVIF 一个文件就占 7.53MB。
+# 剪裁后主窗口、书架、正文渲染、关于/捐赠弹窗（PIL 打开 PNG）均已实测正常。
+_DROP_BINARIES = ('PIL\\_avif', 'PIL\\_webp', 'PIL\\_imagingcms', 'libwebp-7.dll')
+
+
+def _prune_binaries(toc):
+    kept = []
+    for _item in toc:
+        _dest = str(_item[0]).replace('/', '\\')
+        if any(_dest == _d or _dest.startswith(_d) for _d in _DROP_BINARIES):
+            continue
+        kept.append(_item)
+    return kept
+
+
+a.binaries = _prune_binaries(a.binaries)
 exe = EXE(
     pyz,
     a.scripts,

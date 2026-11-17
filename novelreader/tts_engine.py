@@ -18,7 +18,6 @@ import json
 import hashlib
 import subprocess
 
-import asyncio
 import queue
 import re
 import tempfile
@@ -28,28 +27,55 @@ import urllib.request
 import time
 import sys
 
-try:
-    import pyttsx3
-except Exception:  # pragma: no cover
-    pyttsx3 = None
+# 惰性导入：pyttsx3 / edge_tts / pycaw 都是"用到才需要"的重依赖
+# （edge_tts 含 aiohttp 实测 438ms、pycaw 131ms，pyttsx3 走 COM 也不轻）。
+# 启动路径只建 SpeechController，不朗读也不出声，因此一律推迟到首次使用时导入。
+# PyInstaller 仍会静态收集这些包（import 语句在函数体内同样被分析）。
+pyttsx3 = None
+edge_tts = None
+_HAS_PYCAW = None  # None=未探测 / True / False
+_AudioUtilities = None
+_ISimpleAudioVolume = None
 
-try:
-    import edge_tts
-except Exception:  # pragma: no cover
-    edge_tts = None
+
+def _load_pyttsx3():
+    global pyttsx3
+    if pyttsx3 is None:
+        try:
+            import pyttsx3 as _m
+        except Exception:
+            return None
+        pyttsx3 = _m
+    return pyttsx3
+
+
+def _load_edge_tts():
+    global edge_tts
+    if edge_tts is None:
+        try:
+            import edge_tts as _m
+        except Exception:
+            return None
+        edge_tts = _m
+    return edge_tts
+
+
+def _load_pycaw():
+    """探测 pycaw（Windows 进程音量）。返回 (可用?, AudioUtilities, ISimpleAudioVolume)。"""
+    global _HAS_PYCAW, _AudioUtilities, _ISimpleAudioVolume
+    if _HAS_PYCAW is None:
+        try:
+            from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+            _AudioUtilities = AudioUtilities
+            _ISimpleAudioVolume = ISimpleAudioVolume
+            _HAS_PYCAW = True
+        except Exception:
+            _HAS_PYCAW = False
+    return _HAS_PYCAW, _AudioUtilities, _ISimpleAudioVolume
 
 import ctypes
-try:
-    from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
-    _HAS_PYCAW = True
-except Exception:
-    _HAS_PYCAW = False
 from ctypes import wintypes
 
-try:
-    import pyttsx3
-except Exception:  # pragma: no cover
-    pyttsx3 = None
 from .textproc import clean_to_orig, orig_to_clean
 from .audio_bus import AudioBus, SessionClock
 
@@ -146,13 +172,16 @@ def _sanitize_name(s):
 
 def synth_audio(text, voice, rate=200):
     """用 Edge 神经语音把一句文本合成为 MP3 字节（独立事件循环，线程安全）。"""
-    if edge_tts is None:
+    import asyncio  # 惰性导入：只有 Edge 朗读真正出声时才需要（启动路径不需要事件循环）
+
+    mod = _load_edge_tts()
+    if mod is None:
         raise RuntimeError("edge-tts 未安装")
     rate_adj = int((max(50, min(400, int(rate))) - 200) / 2)
     buf = bytearray()
 
     async def _gen():
-        c = edge_tts.Communicate(text, voice, rate=f"{rate_adj:+d}%")
+        c = mod.Communicate(text, voice, rate=f"{rate_adj:+d}%")
         async for chunk in c.stream():
             if chunk["type"] == "audio":
                 buf.extend(chunk["data"])
@@ -1602,9 +1631,10 @@ class SpeechController:
 
             def work():
                 try:
-                    if pyttsx3 is None:
+                    mod = _load_pyttsx3()
+                    if mod is None:
                         return
-                    e = pyttsx3.init()
+                    e = mod.init()
                     try:
                         out.extend(v.id for v in e.getProperty("voices"))
                     finally:
@@ -1755,10 +1785,11 @@ class SpeechController:
         # 否则 pyttsx3.init() 抛 CO_E_NOTINITIALIZED（被吞）→ _engine 为 None → 后续 .connect 崩溃。
         if self._backend != "sapi":
             return
-        if self._engine is None and pyttsx3 is not None:
+        mod = _load_pyttsx3()
+        if self._engine is None and mod is not None:
             try:
                 self._coinit_com()
-                self._engine = pyttsx3.init()
+                self._engine = mod.init()
                 # 注意：这里绝不能 startLoop()。系统语音已改为 save_to_file + runAndWait
                 # 合成到文件（再由 AudioBus 播放），而 runAndWait 在已 startLoop 的引擎上
                 # 会抛 "run loop already started"。
@@ -2214,7 +2245,8 @@ def _mci_set_volume(volume_0_100):
 
 def _set_process_volume(volume_0_100):
     """通过 Windows Core Audio 设置当前进程音量（0-100）。优先使用 pycaw。"""
-    if not _HAS_PYCAW:
+    ok, AudioUtilities, ISimpleAudioVolume = _load_pycaw()
+    if not ok:
         return False
     try:
         volume = max(0.0, min(1.0, volume_0_100 / 100.0))

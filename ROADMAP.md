@@ -5,6 +5,14 @@
 
 ## 已实装（勾选留档）
 
+### v2.2.7（2026-11-18 归档）：性能与包体
+
+- [x] **滚动落盘卡顿**：停止滚动后的保存由「2 次全量写 library.json + 整表重建书架」改为「1 次合并落盘（`save_reading_state`）+ 只更新本书行」，主线程 63.3ms → 5.9ms，一轮写盘 58 → 6 次；`storage.py` 加 `_save_lock` 消除并发重写导致的 120ms 重试
+- [x] **书架缓存大小计算**：主线程不再 `join(timeout=0.05)` 等旧线程，改常驻单 worker + `queue.Queue`，主线程 `after` 轮询写单元格；只在大小真变化时落盘一次（顺带修掉跨线程直接 `root.after` 卡死 Tcl 的隐患）
+- [x] **启动导入链**：`book_loader` 的 docx/mobi、`tts_engine` 的 pyttsx3/edge_tts/pycaw/asyncio 改函数内惰性导入，`import novelreader.gui` 1651ms → 313ms；spec hiddenimports 补 `mobi`
+- [x] **包体瘦身**：两份 spec 加 `_prune_binaries` 裁掉 PIL AVIF/WebP/色彩管理插件 + libwebp（8.62MB）、删掉重复的 tcl8.6/tk8.6 脚本库（4.69MB）；onedir 87.1→73.79MB、onedir zip 43.05→36.02MB、onefile 42.09→35.99MB
+- [ ] **待评估（未做）**：`pygame\` 与根目录重复 DLL 5.76MB（需先做朗读冒烟确认 mp3 解码仍可用）；PDF/pdfium 7.04MB 与 docx/lxml 6.59MB 做成按需下载插件包（改变产品形态，需用户拍板）
+
 ### v1.97 改进计划（2026-09-01 全部实装，打包 `releases/v1.97/多多朗读_v1.97.exe`）
 
 - [x] **新增阅读主题「米黄·截图款」**：按用户提供的小说 App 截图提取，`{"bg": "#DCD1B5", "fg": "#000000", "hl": "#E8C87A"}`，加入 THEMES（拟命名「米黄」或「羊皮纸」）

@@ -122,6 +122,9 @@ class Storage:
     def __init__(self, path=None):
         self.path = path or os.path.join(data_dir(), "library.json")
         self.data = {"books": {}, "settings": dict(DEFAULT_SETTINGS)}
+        # 写锁：主线程（阅读落盘）与后台线程（缓存大小维护）都会触发全量保存，
+        # 两者共用同一个 "<path>.tmp"，无锁时并发 os.replace 会互相打断并走 0.12s 重试。
+        self._save_lock = threading.RLock()
         self.load()
 
     # ---------- 基础读写 ----------
@@ -141,17 +144,18 @@ class Storage:
         self.data["settings"] = s
 
     def save(self):
-        tmp = self.path + ".tmp"
-        for _attempt in range(4):
-            try:
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(self.data, f, ensure_ascii=False, indent=1)
-                os.replace(tmp, self.path)
-                return
-            except (PermissionError, OSError):
-                if _attempt == 3:
-                    raise
-                time.sleep(0.12)
+        with self._save_lock:
+            tmp = self.path + ".tmp"
+            for _attempt in range(4):
+                try:
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(self.data, f, ensure_ascii=False, indent=1)
+                    os.replace(tmp, self.path)
+                    return
+                except (PermissionError, OSError):
+                    if _attempt == 3:
+                        raise
+                    time.sleep(0.12)
 
     # ---------- 设置 ----------
     def get_setting(self, key, default=None):
@@ -181,12 +185,23 @@ class Storage:
     def all_books(self):
         return self.data["books"]
 
-    def update_progress(self, bid, progress):
+    def update_progress(self, bid, progress, save=True):
         b = self.data["books"].get(bid)
         if not b:
             return
         b["progress"] = progress
         b["last_read_at"] = time.time()
+        if save:
+            self.save()
+
+    def save_reading_state(self, bid, progress, last_book):
+        """阅读位置 + 上次书 一次性落盘（原来分两次调用 = 两次全量 JSON 重写）。"""
+        b = self.data["books"].get(bid)
+        if b:
+            b["progress"] = progress
+            b["last_read_at"] = time.time()
+        if last_book:
+            self.data["settings"]["last_book"] = last_book
         self.save()
 
     def remove_book(self, bid):
@@ -251,13 +266,14 @@ class Storage:
         b = self.data["books"].get(bid)
         return bool(b) and "cache_size" in b
 
-    def set_book_cache_size(self, bid, size):
-        """持久化书籍总缓存大小。"""
+    def set_book_cache_size(self, bid, size, save=True):
+        """持久化书籍总缓存大小（save=False 时只写内存，由调用方批量落盘一次）。"""
         b = self.data["books"].get(bid)
         if not b:
             return
         b["cache_size"] = int(size)
-        self.save()
+        if save:
+            self.save()
 
     # ---------- 解析缓存 ----------
     def cache_path(self, bid):
