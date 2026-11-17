@@ -35,6 +35,45 @@ from .constants import (
 )
 
 
+def apply_window_icon(root, ico_path):
+    """Windows：按窗口 DPI 用精确尺寸设置窗口大/小图标，修掉任务栏与标题栏图标发虚。
+
+    原因：Tk 的 wm iconbitmap 只向系统提交**一个** HICON（通常是 32px），Windows 再把
+    它缩成标题栏需要的 24px（150% 缩放）或放大成任务栏需要的 48px，两次重采样都在
+    图标边缘产生糊边。这里直接 LoadImageW 从 .ico 里取该尺寸的现成位图（ico 内已含
+    16/20/24/28/32/40/48/56/64/72/96/128/256 各档，按 LANCZOS 单独渲染），再 WM_SETICON。
+    非 Windows 或调用失败时静默返回 False，由调用方回落到 iconbitmap。
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        from ctypes import wintypes
+        u32 = ctypes.windll.user32
+        root.update_idletasks()
+        win_id = root.winfo_id()
+        hwnd = u32.GetAncestor(win_id, 2)  # GA_ROOT：Tk 的子窗口 → 真正的顶层窗口
+        if not hwnd:
+            hwnd = win_id
+        try:
+            dpi = u32.GetDpiForWindow(hwnd) or 96
+        except Exception:
+            dpi = 96
+        scale = dpi / 96.0
+        # 标题栏小图标 / 任务栏大图标：Windows 就是按 16 与 32 逻辑像素再乘缩放比取值
+        targets = ((0, max(8, int(round(16 * scale)))),    # ICON_SMALL
+                   (1, max(16, int(round(32 * scale)))))   # ICON_BIG
+        ok = False
+        for index, px in targets:
+            h = u32.LoadImageW(None, ico_path, 1, px, px, 0x0010)  # IMAGE_ICON | LR_LOADFROMFILE
+            if not h:
+                continue
+            u32.SendMessageW(hwnd, 0x0080, index, h)  # WM_SETICON
+            ok = True
+        return ok
+    except Exception:
+        return False
+
+
 class NovelReaderBase:
     """基类：启动加载、UI 构建、公共缓存统计与工具方法。"""
     def __init__(self, root):
@@ -518,7 +557,18 @@ class NovelReaderBase:
         icon = self._icon_path()
         if icon:
             try:
-                self.root.iconbitmap(icon)
+                # default= 让后续弹出的 Toplevel（关于/设置/书架等）也继承同一图标
+                self.root.iconbitmap(default=icon)
+            except Exception:
+                try:
+                    self.root.iconbitmap(icon)
+                except Exception:
+                    pass
+            # Windows：再用精确尺寸 HICON 覆盖，任务栏/标题栏不再被系统二次重采样
+            try:
+                apply_window_icon(self.root, icon)
+                # DPI 可能在建窗后才稳定下来，稍后再设一次
+                self.root.after(400, lambda: apply_window_icon(self.root, icon))
             except Exception:
                 pass
         self._apply_ui_theme(self.settings.get("ui_theme", "A·米黄暖读"))

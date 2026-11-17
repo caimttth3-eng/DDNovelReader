@@ -19,6 +19,28 @@ except Exception:  # pragma: no cover - 依赖缺失降级
 from novelreader.i18n import T as _T
 
 
+def _tray_icon_size():
+    """系统通知区图标像素尺寸（随 DPI 变化：100%→16、150%→24、200%→32）。
+
+    用屏幕 DC 的 LOGPIXELSY 取真实缩放比——GetDpiForSystem 在非 DPI 感知进程里只会返回 96。
+    """
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+            u32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            try:
+                hdc = u32.GetDC(0)
+                dpi = gdi32.GetDeviceCaps(hdc, 88) or 96  # LOGPIXELSY
+                u32.ReleaseDC(0, hdc)
+                return max(16, int(round(16 * dpi / 96.0)))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return 32
+
+
 def _resource_base():
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
@@ -69,12 +91,20 @@ class TrayIcon:
 
     # ---------- 图标资源 ----------
     def _tray_image(self):
-        # 优先复用软件主图标 assets/app.ico（与窗口图标一致），缩放 32px
+        # 优先复用软件主图标 assets/app.ico（与窗口图标一致）。
+        # 托盘尺寸由系统 DPI 决定（150% 缩放下是 24px）：直接从 ico 取该尺寸的现成位图，
+        # 不要拿 32px 图缩给它，否则通知区图标同样会糊。
         try:
             p = os.path.join(_resource_base(), "assets", "app.ico")
             if os.path.exists(p):
+                size = _tray_icon_size()
                 img = Image.open(p)
-                img = img.resize((32, 32), Image.LANCZOS)
+                try:
+                    img.size = (size, size)   # ico 内含该尺寸则直接取，最锐
+                except Exception:
+                    img = Image.open(p)
+                    img.size = (32, 32)
+                    img = img.resize((size, size), Image.LANCZOS)
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
                 return img
