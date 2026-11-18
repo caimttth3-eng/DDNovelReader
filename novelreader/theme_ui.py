@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """外观设置：主题 / 书页配色 / 字号 / 行距 / 空行模式 / 停顿间隔（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -13,6 +13,12 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, book_loader
+from .content_key import (
+    RATE_MIN as _RATE_MIN,
+    RATE_MAX as _RATE_MAX,
+    RATE_STEP as _RATE_STEP,
+    format_multiplier as _format_multiplier,
+)
 from .storage import (
     Storage,
     cache_dir,
@@ -77,11 +83,16 @@ class ThemeMixin:
         self.settings["volume"] = v
         self.storage.set_setting("volume", v)
     def _on_rate_change(self, val):
-        v = int(float(val))
-        self.rate_label.configure(text=str(v))
-        self.tts.set_rate(v)
-        self.settings["tts_rate"] = v
-        self.storage.set_setting("tts_rate", v)
+        # 语速按真实倍数走：内部仍存 100~400 整数标度（缓存目录按 pct 分），界面显示 0.50×~2.00×
+        try:
+            rate = int(round(float(val) / _RATE_STEP) * _RATE_STEP)
+        except Exception:
+            rate = 200
+        rate = max(_RATE_MIN, min(_RATE_MAX, rate))
+        self.rate_label.configure(text=_format_multiplier(rate))
+        self.tts.set_rate(rate)
+        self.settings["tts_rate"] = rate
+        self.storage.set_setting("tts_rate", rate)
     def _on_rate_release(self, event):
         """松开语速滑块时检查缓存不匹配。"""
         try:

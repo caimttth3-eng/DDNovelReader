@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """整本缓存下载管理器：多书任务列表 / 章节选择 / 暂停继续 / 继续上次 / 自动关机（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -13,6 +13,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, book_loader
+from .content_key import format_multiplier as _format_multiplier
 from .storage import (
     Storage,
     cache_dir,
@@ -167,7 +168,7 @@ class DownloadMixin:
 
         # 显示当前缓存参数
         voice_name = self.settings.get("tts_voice", "")
-        rate_val = self.settings.get("tts_rate", 200)
+        rate_val = _format_multiplier(self.settings.get("tts_rate", 200))
         gap_val = self.settings.get("tts_sentence_gap", 0.5)
         tk.Label(
             win,

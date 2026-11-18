@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """TTS 控制：开始 / 暂停 / 继续 / 停止 / 语速 / 音量 / 语音切换（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -23,6 +23,11 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController, split_sentences
+from .content_key import (
+    RATE_MIN as _RATE_MIN,
+    RATE_MAX as _RATE_MAX,
+    format_multiplier as _format_multiplier,
+)
 from .textproc import clean_to_orig
 from .i18n import T as _T
 from .constants import (
@@ -290,7 +295,7 @@ class TtsMixin:
             self.book_cache_label.configure(text="", fg="#8a5a00", font=("微软雅黑", 9))
     def _change_rate(self, delta):
         old_rate = int(self.settings.get("tts_rate", 200))
-        new_rate = max(50, min(400, old_rate + delta))
+        new_rate = max(_RATE_MIN, min(_RATE_MAX, old_rate + delta))
         if new_rate == old_rate:
             return
         if self._has_any_book_cache():
@@ -298,7 +303,11 @@ class TtsMixin:
             if not messagebox.askyesno("提示", "更改语速后，已有的整本缓存将不命中，需要重新缓存。是否继续？"):
                 return
         self.settings["tts_rate"] = new_rate
-        self.rate_label.configure(text=str(new_rate))
+        try:
+            self.rate_var.set(new_rate)      # 快捷键也要把滑块同步过去
+        except Exception:
+            pass
+        self.rate_label.configure(text=_format_multiplier(new_rate))
         self.tts.set_rate(new_rate)
         self.storage.set_setting("tts_rate", new_rate)
     def _on_voice_change(self, event):

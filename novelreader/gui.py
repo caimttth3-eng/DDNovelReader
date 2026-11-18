@@ -23,6 +23,13 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .content_key import (
+    RATE_MIN as _RATE_MIN,
+    RATE_MAX as _RATE_MAX,
+    RATE_STEP as _RATE_STEP,
+    format_multiplier as _format_multiplier,
+    rate_of_multiplier as _rate_of_multiplier,
+)
 from .constants import (
     THEMES,
     UI_THEMES,
@@ -890,11 +897,12 @@ class NovelReaderBase:
         ttk.Separator(row3, orient="vertical").pack(side="left", fill="y", padx=8)
         _lbl(row3, _T("语速"))
         self.rate_var = tk.DoubleVar(value=200)
-        self.rate_scale = ttk.Scale(row3, from_=50, to=400, variable=self.rate_var,
+        # 语速用真实倍数标注（0.50×~2.00×）：Edge 实测倍数 ≈ rate/200，上限就是 +100%(2.00×)
+        self.rate_scale = ttk.Scale(row3, from_=_RATE_MIN, to=_RATE_MAX, variable=self.rate_var,
                                      command=self._on_rate_change, length=110)
         self.rate_scale.pack(side="left", padx=(2, 4))
         self.rate_scale.bind("<ButtonRelease-1>", self._on_rate_release)
-        self.rate_label = tk.Label(row3, text="200", width=4, font=("微软雅黑", 10))
+        self.rate_label = tk.Label(row3, text="1.00×", width=5, font=("微软雅黑", 10))
         self.rate_label.pack(side="left", padx=(0, 8))
 
         _lbl(row3, _T("停顿"))
@@ -947,7 +955,7 @@ class NovelReaderBase:
             theme = "护眼"
         self.theme_cb.set(_T(theme))
         self.rate_var.set(int(self.settings.get("tts_rate", 200)))
-        self.rate_label.configure(text=str(self.settings.get("tts_rate", 200)))
+        self.rate_label.configure(text=_format_multiplier(self.settings.get("tts_rate", 200)))
         self.tts.set_rate(self.settings.get("tts_rate", 200))
         self.tts.set_sentence_gap(self.settings.get("tts_sentence_gap", 0.10))
         self.gap_var.set(float(self.settings.get("tts_sentence_gap", 0.10)))

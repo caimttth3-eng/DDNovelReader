@@ -202,3 +202,39 @@ def rate_from_pct(pct):
         return 200 + 2 * int(pct)
     except Exception:
         return 200
+
+
+# ---------------------------------------------------------------- 语速倍数（UI 展示口径，v2.3.0）
+# 实测（2026-11-18，Edge zh-CN-XiaoxiaoNeural，同一句话去静音后时长）：
+#   rate 100(-50%) → 0.50×   rate 200(+0%) → 1.00×   rate 300(+50%) → 1.50×
+#   rate 350(+75%) → 1.74×   rate 400(+100%) → 1.99×
+# 即真实倍数 ≈ rate / 200；Edge 服务端上限就是 +100%（2.00×），再往上（+125%…）被忽略，
+# 所以界面只暴露 0.50×~2.00×，步进 0.05×（对应内部 rate 每 10 一档，缓存目录 pct 每 5 一档）。
+
+RATE_MIN = 100      # 0.50× —— Edge 再慢也只能到约 0.50×，更小的标度没有实际效果
+RATE_MAX = 400      # 2.00× —— Edge 上限 +100%
+RATE_STEP = 10      # 0.05×
+
+
+def multiplier_of_rate(rate):
+    """PC 整数标度 → 真实语速倍数（0.50~2.00）。"""
+    try:
+        v = max(RATE_MIN, min(RATE_MAX, int(round(float(rate)))))
+    except Exception:
+        v = 200
+    return v / 200.0
+
+
+def rate_of_multiplier(mult):
+    """真实语速倍数 → PC 整数标度（按 RATE_STEP 取整，夹在 0.50~2.00）。"""
+    try:
+        m = float(mult)
+    except Exception:
+        m = 1.0
+    rate = int(round(m * 200.0 / RATE_STEP)) * RATE_STEP
+    return max(RATE_MIN, min(RATE_MAX, rate))
+
+
+def format_multiplier(rate):
+    """界面显示用：'1.55×'。"""
+    return "%.2f×" % multiplier_of_rate(rate)

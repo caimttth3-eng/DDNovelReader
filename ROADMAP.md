@@ -7,6 +7,10 @@
 
 ### v2.3.0（2026-11-18 归档）：Edge 语音逐词高亮
 
+- [x] **语速改按真实倍数标注（用户 2026-11-18 要求）**：界面从「50~400」改为 **0.50×~2.00×（步进 0.05×，如 1.55×）**；`content_key.py` 新增 `multiplier_of_rate` / `rate_of_multiplier` / `format_multiplier` 与 `RATE_MIN/RATE_MAX/RATE_STEP`；滑块、快捷键（Ctrl+←/→ 每次 0.05×）、缓存管理器参数行全部改成倍数显示；内部仍存 100~400 整数标度，**缓存目录 pct 口径不变**，老缓存不受影响
+- [x] **实测标定（关键依据）**：同一句话在 Edge 下测时长——rate 100→0.50×、200→1.00×、250→1.25×、300→1.50×、350→1.74×、400→1.99×，即**真实倍数 ≈ rate/200**；**Edge 服务端上限就是 +100%（2.00×）**，rate 450/500/600/800 时长与 400 完全相同（参数被忽略），rate 50 与 100 也相同（已到最慢）。因此 3.00× 用 Edge 做不到，界面只暴露到 2.00× 并在说明里写清
+- [x] **回归**：`tests/test_rate_multiplier.py` 24 项（倍数映射/回环/边界夹取/与安卓 pct 口径一致/非档位值显示真实倍数）
+
 - [x] **逐词时间轴**：新增 `novelreader/speech_word.py`（`SpeechWord` / `SpeechWordCollector` / `word_at` / `shift_words` / JSON 往返 / 清洗文本→显示文本对齐），逻辑对齐安卓 1.3.0 的 `speech_word.dart`：Edge 元数据 100ns → ms、HTML 转义还原、按顺序 indexOf 定位（重复词各有坐标）、定位不到就丢弃
 - [x] **引擎接入**：`synth_audio` 现在返回 `(audio, words)`，并**显式传 `boundary="WordBoundary"`**（edge-tts 7.x 默认只要句子边界）；拿不到词边界时保留已收音频或退回句子边界重合成，保证朗读不受影响；预取队列 / 现场合成 / 整本缓存三条路径都带上词表
 - [x] **播放对齐**：`_trim_edge_silence_ex` 返回「句首裁掉多少毫秒」，词表据此整体平移（否则高亮整体偏晚约 150ms）；`SpeechController.playback_position_ms()` 取 pygame 位置，`current_word()` 二分查当前词
