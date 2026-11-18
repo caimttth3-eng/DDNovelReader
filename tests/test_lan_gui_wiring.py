@@ -111,7 +111,9 @@ def main():
     dlg._collect()
     check("收集设置不报错且端口归一", int(app.settings.get("lan_port")) == port)
     dlg._refresh_lan()
-    check("状态文本已渲染", "监听端口" in dlg.lbl_lan.cget("text"))
+    lan_text = dlg.lbl_lan.cget("text")
+    check("状态文本已渲染", ("端口" in lan_text) and ("运行" in lan_text) and ("请求" in lan_text),
+          lan_text[:80])
     dlg._on_close()
     root.update_idletasks()
 

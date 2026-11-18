@@ -27,7 +27,9 @@ from ctypes import wintypes
 
 import psutil
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE) if os.path.basename(HERE) == "tools" else HERE
+sys.path.insert(0, ROOT)
 OUT = os.path.join(ROOT, "_verify_lan_pack.txt")
 LINES = []
 
@@ -167,7 +169,7 @@ def main():
         log("无凭据 PROPFIND → %s（应 401）" % code)
         ok &= code == 401
         code, body = propfind(port, TOKEN)
-        log("带配对码 PROPFIND → %s（应 207），响应 %d 字节" % (code, len(body or b"")))
+        log("带账号密码 PROPFIND → %s（应 207），响应 %d 字节" % (code, len(body or b"")))
         ok &= code == 207 and b"multistatus" in (body or b"")
         # 主窗口确实开着
         wins = [w for w in windows_of(pids_of(proc.pid)) if "多多朗读" in w[2]]

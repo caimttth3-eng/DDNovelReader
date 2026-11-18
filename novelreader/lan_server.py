@@ -7,7 +7,7 @@
   不做通用 WebDAV（无 LOCK/PROPPATCH/COPY），不能被资源管理器当网盘挂载
 - **随软件启停**：不注册系统服务；退出时 `stop()` 释放端口与线程
 - **后台线程绝不碰 Tk**：只更新加锁的状态快照，UI 自己轮询读取
-- Basic 鉴权：用户名固定，密码为配对码（由 UI 生成，可重新生成作废）
+- Basic 鉴权：账号 + 密码（默认账号 duoduo，密码首次随机生成、用户可在界面自行修改）
 
 线程模型：1 个 acceptor 线程（阻塞在 accept，CPU≈0）+ 按需 per-request 线程（daemon）。
 """
@@ -83,7 +83,7 @@ def local_addresses():
 
 
 def new_token():
-    """配对码：12 位小写十六进制，方便手机手填。"""
+    """默认密码：12 位小写十六进制，方便手机手填（用户可在界面改成自己的）。"""
     return os.urandom(6).hex()
 
 

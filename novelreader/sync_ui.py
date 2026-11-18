@@ -45,7 +45,7 @@ class SyncMixin:
 
     # ---------------- 设置默认值 ----------------
     def _lan_defaults(self):
-        """补齐局域网相关设置（首次调用时生成配对码）。"""
+        """补齐局域网相关设置（首次调用时生成一个默认密码，之后用户可自行修改）。"""
         s = self.settings
         changed = False
         if "lan_enabled" not in s:
@@ -75,7 +75,7 @@ class SyncMixin:
 
     # ---------------- 服务端生命周期 ----------------
     def _lan_server_obj(self, recreate=False):
-        """取/建 LanServer；端口、配对码变化时重建。"""
+        """取/建 LanServer；端口、账号、密码变化时重建。"""
         s = self._lan_defaults()
         port = int(s.get("lan_port") or DEFAULT_PORT)
         user = str(s.get("lan_user") or DEFAULT_USER)
@@ -393,8 +393,8 @@ class _SyncDlg:
         self.app = app
         self.top = tk.Toplevel(app.root)
         self.top.title(_T("数据同步"))
-        self.top.geometry("860x760")
-        self.top.minsize(800, 700)
+        self.top.geometry("900x900")
+        self.top.minsize(860, 780)
         self.top.transient(app.root)
         app._center_window(self.top)
         self._bg = UI_THEMES.get(
@@ -433,46 +433,78 @@ class _SyncDlg:
     def _build(self):
         pad = {"padx": 18}
         head = tk.Frame(self.top, bg=self._bg)
-        head.pack(fill="x", **pad, pady=(14, 4))
-        tk.Label(head, text=_T("数据同步"), font=("微软雅黑", 13, "bold"),
-                 bg=self._bg).pack(anchor="w")
+        head.pack(fill="x", **pad, pady=(12, 2))
         tk.Label(
             head,
             text=_T("同步书架信息、阅读进度与书签；不同步正文缓存与音频缓存"),
             font=("微软雅黑", 9), fg="#7A7F87", bg=self._bg,
             wraplength=800, justify="left",
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w")
 
         self.nb = ttk.Notebook(self.top)
-        self.nb.pack(fill="both", expand=True, **pad, pady=(8, 0))
         tab_cloud = tk.Frame(self.nb, bg=self._bg)
         tab_lan = tk.Frame(self.nb, bg=self._bg)
         self.nb.add(tab_cloud, text=_T("云端 WebDAV"))
         self.nb.add(tab_lan, text=_T("局域网本地同步"))
         self._build_cloud(tab_cloud)
-        self._build_lan(tab_lan)
+        # 局域网页签内容较高：放进可滚动容器，小屏 / 高 DPI 下也不会被裁掉
+        self._build_lan(self._scroll_host(tab_lan))
 
+        # 底部三块先按 bottom 占位，Notebook 最后 expand 填剩余空间。
+        # 顺序反了会让 Notebook 吃掉全部余高，状态栏与日志被挤成 0 高（截图里看不见）。
         btns = tk.Frame(self.top, bg=self._bg)
-        btns.pack(fill="x", **pad, pady=(6, 2))
+        btns.pack(side="bottom", fill="x", **pad, pady=(6, 10))
         ttk.Button(btns, text=_T("保存"), command=self._save).pack(side="left")
         ttk.Button(btns, text=_T("关闭"), command=self._on_close).pack(side="right")
-        self.lbl_status = tk.Label(
-            self.top, text=_T("未同步"), font=("微软雅黑", 10), fg="#1A1B1C",
-            bg=self._bg, anchor="w", justify="left")
-        self.lbl_status.pack(fill="x", **pad, pady=(4, 2))
 
         logbox = tk.Frame(self.top, bg=self._bg)
-        logbox.pack(fill="both", expand=False, **pad, pady=(0, 12))
+        logbox.pack(side="bottom", fill="x", **pad, pady=(0, 2))
         sb = make_scrollbar(logbox, None)
         sb.pack(side="right", fill="y")
         self.txt = tk.Text(
-            logbox, height=6, wrap="word", font=("微软雅黑", 9),
+            logbox, height=4, wrap="word", font=("微软雅黑", 9),
             relief="flat", borderwidth=0, highlightthickness=1,
             highlightbackground="#DDE3EC", bg="#FFFFFF", fg="#3C4043",
             yscrollcommand=sb.set)
         self.txt.pack(side="left", fill="both", expand=True)
         sb.configure(command=self.txt.yview)
         self.txt.configure(state="disabled")
+
+        self.lbl_status = tk.Label(
+            self.top, text=_T("未同步"), font=("微软雅黑", 10), fg="#1A1B1C",
+            bg=self._bg, anchor="w", justify="left")
+        self.lbl_status.pack(side="bottom", fill="x", **pad, pady=(4, 2))
+
+        self.nb.pack(side="top", fill="both", expand=True, **pad, pady=(8, 0))
+
+    def _scroll_host(self, parent):
+        """把页签内容放进可滚动容器（内容高于可视区时不裁切）。"""
+        canvas = tk.Canvas(parent, bg=self._bg, highlightthickness=0, borderwidth=0)
+        vsb = make_scrollbar(parent, canvas.yview)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas, bg=self._bg)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(win, width=e.width))
+        canvas.configure(yscrollcommand=vsb.set)
+
+        def _wheel(event):
+            canvas.yview_scroll(-1 if getattr(event, "delta", 0) > 0 else 1, "units")
+
+        def _bind(_e):
+            canvas.bind_all("<MouseWheel>", _wheel)
+
+        def _unbind(_e):
+            canvas.unbind_all("<MouseWheel>")
+
+        for w in (canvas, inner):
+            w.bind("<Enter>", _bind)
+            w.bind("<Leave>", _unbind)
+        self._lan_canvas = canvas
+        return inner
 
     def _build_cloud(self, parent):
         form = tk.Frame(parent, bg=self._bg)
@@ -523,16 +555,16 @@ class _SyncDlg:
 
         def _lab(r, text):
             tk.Label(form, text=text, font=("微软雅黑", 10), bg=self._bg,
-                     width=10, anchor="e").grid(row=r, column=0, sticky="e", pady=5, padx=(0, 10))
+                     width=12, anchor="e").grid(row=r, column=0, sticky="e", pady=5, padx=(0, 10))
 
         _lab(0, _T("服务端口"))
         e_port = ttk.Entry(form, textvariable=self.var_lan_port, width=10)
         e_port.grid(row=0, column=1, sticky="w", pady=5)
         _lab(1, _T("账号"))
-        ttk.Entry(form, textvariable=self.var_lan_user, state="readonly").grid(
+        ttk.Entry(form, textvariable=self.var_lan_user).grid(
             row=1, column=1, sticky="ew", pady=5)
-        _lab(2, _T("配对码（密码）"))
-        ttk.Entry(form, textvariable=self.var_lan_token, state="readonly").grid(
+        _lab(2, _T("密码"))
+        ttk.Entry(form, textvariable=self.var_lan_token).grid(
             row=2, column=1, sticky="ew", pady=5)
         _lab(3, _T("远端目录"))
         ttk.Entry(form, textvariable=self.var_lan_dir, state="readonly").grid(
@@ -543,7 +575,6 @@ class _SyncDlg:
         ttk.Button(btns, text=_T("启动服务"), command=self._lan_start_click).pack(side="left")
         ttk.Button(btns, text=_T("停止服务"), command=self._lan_stop_click).pack(side="left", padx=8)
         ttk.Button(btns, text=_T("立即合并"), command=self._lan_merge_click).pack(side="left")
-        ttk.Button(btns, text=_T("重新生成配对码"), command=self._lan_regen).pack(side="left", padx=8)
 
         box = tk.Frame(parent, bg=self._bg)
         box.pack(fill="x", padx=6, pady=(6, 2))
@@ -558,13 +589,11 @@ class _SyncDlg:
         self.txt_pair = tk.Text(box, height=5, wrap="none", font=("Consolas", 9),
                                 relief="flat", borderwidth=0, highlightthickness=1,
                                 highlightbackground="#DDE3EC", bg="#FFFFFF", fg="#1A1B1C")
-        self.txt_pair.pack(fill="x", pady=(2, 4))
+        self.txt_pair.pack(fill="x", pady=(2, 2))
         self.txt_pair.configure(state="disabled")
-        tk.Label(box,
-                 text=_T("提示：首次开启如弹出防火墙提示，请选择「允许」（专用网络）；"
-                         "手机与电脑需在同一局域网。"),
+        tk.Label(box, text=_T("提示：首次开启请允许防火墙（专用网络）；手机与电脑需在同一 Wi-Fi。"),
                  font=("微软雅黑", 9), fg="#7A7F87", bg=self._bg,
-                 wraplength=780, justify="left").pack(anchor="w")
+                 wraplength=820, justify="left").pack(anchor="w")
 
     # ---------------- 局域网动作 ----------------
     def _lan_state_text(self, st):
@@ -627,25 +656,6 @@ class _SyncDlg:
         else:
             self._status(_T("局域网合并失败：{e}").format(e=report.get("error") or ""))
 
-    def _lan_regen(self):
-        if not messagebox.askyesno(
-                _T("重新生成配对码"),
-                _T("重新生成后，手机端需要重新填写新的配对码。继续？")):
-            return
-        token = new_token()
-        self.var_lan_token.set(token)
-        self.app.settings["lan_token"] = token
-        try:
-            self.app.storage.set_setting("lan_token", token)
-        except Exception:
-            pass
-        was_running = self.app._lan_status().get("state") == ST_RUNNING
-        self.app._lan_server_obj(recreate=True)
-        if was_running or self.var_lan_on.get():
-            self.app._lan_start(quiet=False)
-        self._log(_T("配对码已更新"))
-        self._refresh_lan()
-
     # ---------------- 状态刷新 ----------------
     def _refresh_lan(self):
         try:
@@ -654,17 +664,19 @@ class _SyncDlg:
             return
         servers = st.get("addresses") or []
         lines = [
-            _T("状态：{s}").format(s=self._lan_state_text(st)),
-            _T("监听端口：{p}").format(p=st.get("port") or self.var_lan_port.get()),
-            _T("运行时长：{t}").format(t=_fmt_uptime(st.get("uptime"))),
-            _T("请求数：{n}　活跃连接：{a}").format(n=st.get("requests", 0), a=st.get("active", 0)),
+            _T("状态：{s}　端口：{p}　运行：{t}").format(
+                s=self._lan_state_text(st),
+                p=st.get("port") or self.var_lan_port.get(),
+                t=_fmt_uptime(st.get("uptime"))),
+            _T("请求：{n}　活跃：{a}").format(
+                n=st.get("requests", 0), a=st.get("active", 0)),
         ]
         if st.get("last_request"):
-            lines.append(_T("最近请求：{r}").format(r=st["last_request"]))
+            lines[1] += _T("　最近：{r}").format(r=str(st["last_request"])[:48])
         if st.get("last_error"):
-            lines.append(_T("最近错误：{e}").format(e=st["last_error"]))
+            lines.append(_T("最近错误：{e}").format(e=str(st["last_error"])[:60]))
         if st.get("state") == ST_ERROR and st.get("error"):
-            lines.append(_T("错误：{e}").format(e=st["error"]))
+            lines.append(_T("错误：{e}").format(e=str(st["error"])[:60]))
         try:
             self.lbl_lan.configure(text="\n".join(lines))
         except Exception:
@@ -689,7 +701,7 @@ class _SyncDlg:
             block.insert(1, _T("其它可用地址") + "：" + "　".join(more))
         block += [
             _T("账号") + "：" + str(info.get("user") or ""),
-            _T("密码（配对码）") + "：" + str(info.get("pass") or ""),
+            _T("密码") + "：" + str(info.get("pass") or ""),
             _T("远端目录") + "：" + str(info.get("dir") or ""),
         ]
         try:
@@ -718,7 +730,11 @@ class _SyncDlg:
         s["lan_port"] = port
         s["lan_enabled"] = bool(self.var_lan_on.get())
         s["lan_user"] = self.var_lan_user.get().strip() or DEFAULT_USER
-        s["lan_token"] = self.var_lan_token.get().strip()
+        pwd = self.var_lan_token.get().strip()
+        if not pwd:                        # 留空则自动生成一个，避免空密码
+            pwd = new_token()
+            self.var_lan_token.set(pwd)
+        s["lan_token"] = pwd
         s["lan_dir"] = self.var_lan_dir.get().strip().strip("/") or LAN_REMOTE_DIR
         s["lan_auto_merge"] = bool(self.var_lan_merge.get())
         return s

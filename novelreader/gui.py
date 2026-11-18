@@ -134,7 +134,7 @@ class NovelReaderBase:
         self.root.after(2500, self._sync_auto_start)
         # 局域网本地同步（v2.2.9）：开了就随软件启动内嵌服务，关闭软件即停止
         try:
-            self._lan_defaults()      # 首次启动即生成配对码，配对信息随时可看
+            self._lan_defaults()      # 首次启动即生成默认账号密码，配对信息随时可看
         except Exception:
             pass
         self.root.after(2600, self._lan_auto_start)
