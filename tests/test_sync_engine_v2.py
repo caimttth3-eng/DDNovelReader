@@ -4,6 +4,7 @@
 跑法： .venv\\Scripts\\python.exe tests\\test_sync_engine_v2.py
 """
 import json
+import io
 import os
 import sys
 import tempfile
@@ -20,6 +21,16 @@ from novelreader.sync_engine import SyncEngine, WebDAVClient, progress_at_of
 from novelreader.content_key import compute_content_key, content_key_of_chapters
 from novelreader.book_loader import parse_book
 from tests.mock_dav import MockDav
+
+# 统一 UTF-8 输出：Windows 控制台默认 cp1252，直接 print 中文会 UnicodeEncodeError
+try:
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 BASE = time.time()   # 以“现在”为基准，避免墓碑 TTL 把测试数据当成过期
 FAIL = []
@@ -279,8 +290,9 @@ def case_delete_older_than_remote_activity():
     SyncEngine(st, settings_for(srv)).sync()
     st.remove_book("bid1")
     # 远端在本机删除之后被另一台设备读过
+    _now = time.time()   # 用"此刻"为基准：本用例前面的用例可能跑了几十秒，用测试开始的 BASE+30 会被本地删除时间反超
     rec = rec_of(key, content.title, {"chapter_idx": 1, "char_offset": 0, "percent": 80.0},
-                 progress_at=BASE + 30, bookmarks=[], bookmarks_at=0)
+                 progress_at=_now + 30, bookmarks=[], bookmarks_at=0)
     rec["source"] = {"ext": ".txt", "size": os.path.getsize(src), "name": "fight.txt"}
     rec["chapter_count"] = len(content.chapters)
     rec["total_chars"] = content.total_chars

@@ -18,6 +18,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from novelreader.lan_server import LanServer, ST_RUNNING, ST_STOPPED, new_token  # noqa: E402
 from novelreader.sync_engine import WebDAVClient, WebDAVError                  # noqa: E402
 
+# 统一 UTF-8 输出：Windows 控制台默认 cp1252，直接 print 中文会 UnicodeEncodeError
+try:
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TMP = os.path.join(ROOT, "_tmp_lan_test")
 FAIL = []

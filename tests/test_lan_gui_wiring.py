@@ -6,6 +6,7 @@
 
 跑法： .venv\\Scripts\\python.exe tests\\test_lan_gui_wiring.py
 """
+import io
 import os
 import shutil
 import socket
@@ -22,9 +23,22 @@ os.environ["DOUBAO_NOVEL_DATA"] = TMP
 
 import tkinter as tk                                              # noqa: E402
 
-from novelreader.gui import NovelReaderApp                        # noqa: E402
+from novelreader.i18n import set_lang as _set_lang
+from novelreader.gui import NovelReaderApp
+
+_set_lang("zh")   # CI 机器系统语言可能是英文，断言用中文，先固定成简体中文                        # noqa: E402
 from novelreader.lan_server import ST_RUNNING, ST_STOPPED          # noqa: E402
 from novelreader.sync_ui import _RUN_LOCK, _SyncDlg                # noqa: E402
+
+# 统一 UTF-8 输出：Windows 控制台默认 cp1252，直接 print 中文会 UnicodeEncodeError
+try:
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 FAIL = []
 

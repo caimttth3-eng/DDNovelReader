@@ -28,6 +28,16 @@ from novelreader.lan_server import LanServer, new_token             # noqa: E402
 from novelreader.storage import Storage                             # noqa: E402
 from novelreader.sync_engine import SyncEngine, WebDAVClient        # noqa: E402
 
+# 统一 UTF-8 输出：Windows 控制台默认 cp1252，直接 print 中文会 UnicodeEncodeError
+try:
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
 FAIL = []
 TOKEN = new_token()
 LAN_DIR = "DDNovelReader"
