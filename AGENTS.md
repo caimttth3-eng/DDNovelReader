@@ -32,5 +32,5 @@
 
 ## 4. 卫生与安全
 
-- 项目根只留正式工程文件、spec 与文档；临时诊断脚本用完即删（长期保留的仅 `_check_notes_sync.py`、`_clean_mei.py`，并注明用途）。
+- 项目根只留正式工程文件、spec 与文档；临时诊断脚本用完即删（长期保留的仅 `_check_notes_sync.py`、`_clean_mei.py`、`_verify_start.py` 与 `tools/gh_release.py`、`tools/gh_ci.py`，用途已写进开发指南）。
 - 大产物走 GitHub Release，不进 git；`_gh_token.txt` 与任何凭据绝不入库、不写进文档。
