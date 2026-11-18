@@ -21,12 +21,15 @@ shutil.rmtree(TMP, ignore_errors=True)      # 每轮干净起步（否则上一�
 os.makedirs(TMP, exist_ok=True)
 os.environ["DOUBAO_NOVEL_DATA"] = TMP
 
+# 先把界面语言写进设置：CI 机器是英文系统，App 启动时会按系统语言自动选英文，
+# 而本测试用中文文案断言，所以必须在建 App 之前把 ui_lang 预置成 zh（App 会尊重已存设置）。
+from novelreader.storage import Storage as _SeedStorage          # noqa: E402
+
+_SeedStorage(path=os.path.join(TMP, "library.json")).set_setting("ui_lang", "zh")
+
 import tkinter as tk                                              # noqa: E402
 
-from novelreader.i18n import set_lang as _set_lang
 from novelreader.gui import NovelReaderApp
-
-_set_lang("zh")   # CI 机器系统语言可能是英文，断言用中文，先固定成简体中文                        # noqa: E402
 from novelreader.lan_server import ST_RUNNING, ST_STOPPED          # noqa: E402
 from novelreader.sync_ui import _RUN_LOCK, _SyncDlg                # noqa: E402
 
