@@ -4,7 +4,7 @@
 
 ## 0. 铁律（不可协商）
 
-1. **任何任务的第一步：先读 `开发环境指南.md`。** 第 1、2、3、4 节必读（环境时间线 / 当前快照 / 已踩的坑 / 验证脚本）；涉及打包或发布，再读完第 5、5b 节。里面的坑都是真实事故换来的，禁止凭记忆或"上次能用"开工。
+1. **任何任务的第一步：先读 `开发环境指南.md`。** 第 1、2、3、4 节必读（当前环境 / 坑速查表 / 已踩的坑 / 自检命令）；涉及打包或发布，再读完第 5、5b 节。历史过程与逐版归档在 `附录_历史.md`（只在追溯时看）。里面的坑都是真实事故换来的，禁止凭记忆或"上次能用"开工。
 2. **踩到的任何问题，一律写回 `开发环境指南.md`。** 按既有格式新增「### 坑 N（日期 新增）：一句话症状」，固定四段：**症状 → 原因 → 修复（已执行内容）→ 防再犯**，并附本轮验证入口（脚本名 / 命令 / 实测数字）。只写在对话里等于没记录。
 3. **结论必须可复现。** 判断"改好了没有"用脚本输出、A/B 实测数字、窗口核对与截图，不用"看起来正常"。
 
@@ -40,11 +40,11 @@
 ## 3. 工程地图
 
 - 入口：`novelreader/main.py`；核心：`gui.py`（组装各 Mixin）、`reader_ui.py`（阅读区 / 朗读控制）、`tts_engine.py`（合成与播放）、`storage.py`（library.json）、`book_loader.py`（解析与分章）、`sync_engine.py` + `sync_ui.py`（WebDAV 同步）、`stats.py` + `stats_ui.py`（阅读统计）、`i18n.py`（五语言词典）。
-- 测试：`tests/` 下 `test_sync_engine_v2.py`、`test_cache_layout*.py`、`test_gui_cache_wiring.py`、`e2e_cross.py`（配 `mock_dav.py`）。
+- 测试：`tests/` 下 `test_sync_engine_v2.py`、`test_cache_layout*.py`、`test_gui_cache_wiring.py`、`test_lan_server.py` / `test_lan_sync_flow.py` / `test_lan_migration.py` / `test_lan_gui_wiring.py`、`test_speech_word.py` / `test_word_highlight.py`（逐词高亮）、`test_rate_multiplier.py`（语速倍数）、`e2e_cross.py`（配 `mock_dav.py`）；跨平台验证走 `.github/workflows/verify-cross.yml`。
 - 安卓端是独立工程：`C:\Users\lyuga\Doubao\chats\2026-09-01\new-chat\duoduo_langdu`（Flutter，单独发布），跨端契约见 `安卓互通指南.md`。
 - 文档：`开发环境指南.md`（环境与坑，权威）、`ROADMAP.md`（版本规划与待办）、`安卓端同步开发指南.md`、`PC端缓存共用改造指南.md`。
 
 ## 4. 卫生与安全
 
-- 项目根只留正式工程文件、spec 与文档；临时诊断脚本用完即删（长期保留的仅 `_check_notes_sync.py`、`_clean_mei.py`、`_verify_start.py` 与 `tools/gh_release.py`、`tools/gh_ci.py`，用途已写进开发指南）。
+- 项目根只留正式工程文件、spec 与文档；临时诊断脚本用完即删（长期保留的仅 `_check_notes_sync.py`、`_clean_mei.py`、`_verify_start.py`、`_pack_v2xx.ps1` 与 `tools/gh_release.py`、`tools/gh_ci.py`、`tools/verify_lan_pack.py`、`tools/verify_word_hl.py`，用途已写进开发指南）。
 - 大产物走 GitHub Release，不进 git；`_gh_token.txt` 与任何凭据绝不入库、不写进文档。
