@@ -307,16 +307,21 @@ class CacheMixin:
         return total, count
 
     def _update_lan_size_label(self, lbl):
-        """异步统计局域网同步数据体积（记录 + 书源文件），结果回 Tk 主线程。"""
-        def _work():
-            size, count = self._lan_data_usage()
-            text = _T("占用 {size}（{n} 个文件）").format(size=self._format_bytes(size), n=count)
-            try:
-                self.root.after(0, lambda: lbl.configure(text=text))
-            except Exception:
-                pass
+        """统计局域网同步数据体积（记录 + 书源文件）并更新标签。
 
-        threading.Thread(target=_work, daemon=True).start()
+        注意：必须**在主线程同步算**。早期版本放在子线程里再 root.after 回主线程，
+        实测打包版里回调不执行（跨线程碰 Tk，见开发指南坑 16），标签永远停在「正在统计…」。
+        这里的数据量是"同步记录 + 书源文件"，通常几十~几千个文件，同步 walk 只是毫秒级。
+        """
+        try:
+            size, count = self._lan_data_usage()
+            pending = self._legacy_lan_pending()
+            text = _T("占用 {size}（{n} 个文件）").format(size=self._format_bytes(size), n=count)
+            if pending:
+                text += _T("；旧位置还有 {m} 个文件待迁移").format(m=pending)
+            lbl.configure(text=text)
+        except Exception:
+            pass
 
     def _clear_lan_data(self, size_lbl=None):
         """清除局域网同步数据（记录 + 书源文件）；不影响本机书架与进度。"""

@@ -296,6 +296,9 @@ class DialogMixin:
 
         _fit_window()
         top.after(120, _refresh_sizes)
+        # 启动后 2.6 秒才做自动迁移；若用户在那之前就打开本窗口，第一次统计会是 0。
+        # 这里补一次延迟刷新（只重算，不阻塞），保证迁移完成后数字能自己变对。
+        top.after(3500, _refresh_sizes)
         top.focus_set()
 
     def _show_shortcuts_dialog(self):

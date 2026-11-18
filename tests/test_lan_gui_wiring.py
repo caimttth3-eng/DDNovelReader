@@ -166,6 +166,79 @@ def main():
             pass
     root.update_idletasks()
 
+    # 6b) 旧位置还有待迁移文件时：卡片要提示；迁移后数字要能自己变对（回归"占用显示 0"）
+    #     注意：应用启动后 after(2600) 会自动迁移，这里先把自动迁移临时挡住，保证"待迁移"状态可观测。
+    real_migrate = app._lan_migrate_legacy
+    app._lan_migrate_legacy = lambda *a, **k: {"moved": False, "reason": "test-disabled"}
+    legacy_dir = os.path.join(TMP, "lan", "DDNovelReader", "v1", "books")
+    os.makedirs(legacy_dir, exist_ok=True)
+    with open(os.path.join(legacy_dir, "ck_pending.json"), "w", encoding="utf-8") as f:
+        f.write('{"title":"pending"}')
+
+    def _pump(seconds=4.0):
+        end = time.time() + seconds
+        while time.time() < end:
+            try:
+                root.update()
+            except Exception:
+                break
+            time.sleep(0.05)
+
+    def _lan_size_texts(dlg):
+        out = []
+        for w in _walk(dlg, []):
+            try:
+                t = str(w.cget("text") or "")
+            except Exception:
+                continue
+            if "占用" in t or "待迁移" in t or "正在统计" in t:
+                out.append(t)
+        return out
+
+    app._show_cache_manager_dialog()
+    root.update_idletasks()
+    dlg2 = None
+    for w in root.winfo_children():
+        if isinstance(w, tk.Toplevel):
+            try:
+                if w.winfo_exists() and "缓存管理" in w.title():
+                    dlg2 = w
+                    break
+            except Exception:
+                pass
+    _pump(4.0)
+    texts2 = _lan_size_texts(dlg2) if dlg2 else []
+    check("旧位置有待迁移文件时给出提示", any("待迁移" in t for t in texts2), texts2)
+
+    app._lan_migrate_legacy = real_migrate
+    app._lan_migrate_legacy(quiet=True)
+    if dlg2 is not None:
+        try:
+            dlg2.destroy()
+        except Exception:
+            pass
+    app._show_cache_manager_dialog()
+    root.update_idletasks()
+    dlg3 = None
+    for w in root.winfo_children():
+        if isinstance(w, tk.Toplevel):
+            try:
+                if w.winfo_exists() and "缓存管理" in w.title():
+                    dlg3 = w
+                    break
+            except Exception:
+                pass
+    _pump(4.0)
+    texts3 = _lan_size_texts(dlg3) if dlg3 else []
+    check("迁移后占用不再是 0（显示实际体积）",
+          any(("占用" in t) and ("0 B" not in t) for t in texts3), texts3)
+    if dlg3 is not None:
+        try:
+            dlg3.destroy()
+        except Exception:
+            pass
+    root.update_idletasks()
+
     # 7) 看门狗：置脏后触发一次合并不崩、锁最终释放
     app._lan_srv.take_dirty()
     app._lan_srv.mark_dirty()
