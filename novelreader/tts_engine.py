@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """TTS 朗读引擎（v3）。
 
 v3 新增双后端：
@@ -34,6 +34,13 @@ from .content_key import (
     rate_dir_key,
     content_key_of_chapters,
     content_key_of_book,
+)
+from .speech_word import (
+    SpeechWordCollector,
+    shift_words,
+    word_at,
+    words_from_json,
+    words_to_json,
 )
 
 # 惰性导入：pyttsx3 / edge_tts / pycaw 都是"用到才需要"的重依赖
@@ -180,7 +187,11 @@ def _sanitize_name(s):
 
 
 def synth_audio(text, voice, rate=200):
-    """用 Edge 神经语音把一句文本合成为 MP3 字节（独立事件循环，线程安全）。"""
+    """用 Edge 神经语音把一句文本合成为 MP3 字节（独立事件循环，线程安全）。
+
+    返回 `(audio_bytes, words)`：words 是逐词高亮用的时间轴（SpeechWord 列表），
+    来自 Edge 的 WordBoundary 元数据；拿不到元数据时为空列表（不影响朗读）。
+    """
     import asyncio  # 惰性导入：只有 Edge 朗读真正出声时才需要（启动路径不需要事件循环）
 
     mod = _load_edge_tts()
@@ -188,19 +199,36 @@ def synth_audio(text, voice, rate=200):
         raise RuntimeError("edge-tts 未安装")
     rate_adj = int((max(50, min(400, int(rate))) - 200) / 2)
     buf = bytearray()
+    collector = SpeechWordCollector(text)
 
-    async def _gen():
-        c = mod.Communicate(text, voice, rate=f"{rate_adj:+d}%")
+    async def _gen(boundary):
+        kw = {"rate": f"{rate_adj:+d}%"}
+        if boundary:
+            # 关键：edge-tts 7.x 默认只给句子边界，要词级时间戳必须显式指定
+            kw["boundary"] = "WordBoundary"
+        c = mod.Communicate(text, voice, **kw)
         async for chunk in c.stream():
             if chunk["type"] == "audio":
                 buf.extend(chunk["data"])
+            else:
+                # WordBoundary：逐词高亮的时间戳（100ns 单位），失败不影响音频
+                try:
+                    collector.add_edge_chunk(chunk)
+                except Exception:
+                    pass
 
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_gen())
+        try:
+            loop.run_until_complete(_gen(True))
+        except Exception:
+            # 拿不到词边界时（极短句/纯标点/服务端抖动）库会抛错；音频已收到的照用，
+            # 音频没收到就退回"只要句子边界"再合成一次，保证朗读不出问题。
+            if not buf:
+                loop.run_until_complete(_gen(False))
     finally:
         loop.close()
-    return bytes(buf)
+    return bytes(buf), collector.finish()
 
 
 # ---------- 外部 TTS 引擎（VOICEVOX / vits-simple-api / Google / 火山 / OpenAI 兼容 / 自定义） ----------
@@ -514,12 +542,12 @@ class _EdgePrefetch:
                 self._written_off = nxt
                 self._written_ci = ci
                 try:
-                    audio = self._synth(text)
+                    audio, words = self._synth(text)
                 except Exception:
-                    audio = None
+                    audio, words = None, []
                 if audio is None:
                     continue
-                item = (text, audio, start, nxt, ci)
+                item = (text, audio, start, nxt, ci, words)
                 while not self._stopped.is_set():
                     try:
                         self._queue.put(item, timeout=0.5)
@@ -857,14 +885,15 @@ class WholeBookCacher:
                     self._done += 1
                 self._maybe_save()
                 continue
+            words = []
             try:
                 if self._is_external:
                     audio, _ext = synth_external(text, self._voice, self._rate)
                 else:
-                    audio = synth_audio(text, self._voice, self._rate)
+                    audio, words = synth_audio(text, self._voice, self._rate)
                 if not audio:
                     continue  # 合成失败/空：不标记完成，留待续传重试
-                self._write(ci, off, audio)
+                self._write(ci, off, audio, words)
             except Exception:
                 continue  # 网络/合成失败：不标记完成，留待续传重试（避免 progress 谎报完成）
             with self._lock:
@@ -913,13 +942,22 @@ class WholeBookCacher:
         except Exception:
             return False
 
-    def _write(self, ci, off, audio):
+    def _write(self, ci, off, audio, words=None):
         try:
             final = self._path(ci, off)
             tmp = final + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(audio)
             os.replace(tmp, final)
+            # 逐词高亮：旁挂一份词级时间轴（.words.json）；没有词就写空表，读侧自然退回句子级
+            try:
+                wpath = self._words_path(ci, off)
+                wtmp = wpath + ".tmp"
+                with open(wtmp, "w", encoding="utf-8") as f:
+                    f.write(words_to_json(words or []))
+                os.replace(wtmp, wpath)
+            except Exception:
+                pass
             with self._lock:
                 self._bytes_written += len(audio)
             if self._bump_cb is not None:
@@ -932,6 +970,10 @@ class WholeBookCacher:
 
     def _path(self, ci, off):
         return os.path.join(self._dir, f"{int(ci):04d}_{int(off):08d}.mp3")
+
+    def _words_path(self, ci, off):
+        """逐词高亮时间轴的旁挂文件（与 mp3 同名，扩展名 .words.json）。"""
+        return os.path.join(self._dir, f"{int(ci):04d}_{int(off):08d}.words.json")
 
     def disk_used(self):
         """当前书籍缓存目录占用字节数（不含 progress.json）。
@@ -1003,6 +1045,9 @@ class SpeechController:
         self._multi_roles = None       # {角色名: voice_id}；None=未启用
         self._multi_dialogues = None   # 当前章对白区间表 {ci: [[start,end,role],...]}
         self._cur_voice = None         # 当前句音色（多人有声按句覆盖，None=用默认语音）
+        # 逐词高亮：当前这句的词级时间轴（裁剪后已平移）与所属会话令牌
+        self._cur_words = []
+        self._cur_words_gen = None
         self._tts_cache_dir = None
         self._cache_workers = 6  # 整本缓存并发下载线程数（gui 启动时从设置读取）
         # 整本语音缓存：按 book_id 管理，每本书独立缓存器，互不阻塞（支持多书同时缓存）
@@ -1376,6 +1421,28 @@ class SpeechController:
         except Exception:
             pass
         return None
+
+    def _cached_words(self, ci, off):
+        """读取整本缓存旁挂的逐词时间轴；没有就返回空表（自动退回句子级高亮）。"""
+        try:
+            if not self._tts_cache_dir:
+                return []
+            with self._cv:
+                is_ext = (self._backend == "external")
+                if not is_ext and self._backend != "edge":
+                    return []
+                voice = self._external_voice if is_ext else (self._cur_voice or self._edge_voice)
+                rate = int(self._rate)
+            key = self._cache_key or self._book_id or "book"
+            _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_ext else _sanitize_name(voice)
+            d = os.path.join(self._tts_cache_dir, key, _vdir, rate_dir_key(rate))
+            p = os.path.join(d, "%04d_%08d.words.json" % (int(ci), int(off)))
+            if not os.path.exists(p):
+                return []
+            with open(p, "r", encoding="utf-8") as f:
+                return words_from_json(f.read())
+        except Exception:
+            return []
 
     def start_book_cache(self, book, book_id, chapter_indices=None, resume=False):
         """开启整本语音缓存（仅 Edge 后端），可按章节子集缓存。
@@ -2197,6 +2264,7 @@ class SpeechController:
 
     # ---------- Edge 后端 ----------
     def _edge_synthesize(self, text):
+        """合成一句，返回 (audio_bytes, words)。words 供逐词高亮；外部引擎没有词表。"""
         with self._cv:
             voice = self._cur_voice or self._edge_voice
             rate = self._rate
@@ -2204,11 +2272,11 @@ class SpeechController:
             ext_voice = self._external_voice
         if backend == "external":
             audio, _ext = synth_external(text, ext_voice, rate)
-            return audio
+            return audio, []
         return synth_audio(text, voice, rate)
 
     def _take_prefetched(self, pf, text, ci, cl_off, gen, deadline):
-        """从预取队列里取到当前句的音频，返回 (audio, need_rebuild)。
+        """从预取队列里取到当前句的音频，返回 (audio, words, need_rebuild)。
 
         正常续读时队首就是当前句，取到即用（零等待）；快捷键往后跳句时，队列里
         夹着中间几句，能直接丢弃就用，丢掉的目标句不在队列里则立刻重建——
@@ -2217,37 +2285,41 @@ class SpeechController:
         """
         while True:
             if self._should_stop(gen):
-                return None, True
+                return None, None, True
             if cl_off is not None and (pf.consumed_ci, pf.consumed_off) > (ci, cl_off):
-                return None, True          # 队列已越过目标句（目标在前方）→ 重建
+                return None, None, True          # 队列已越过目标句（目标在前方）→ 重建
             at_head = cl_off is None or (pf.consumed_ci, pf.consumed_off) == (ci, cl_off)
             item = pf.get(timeout=0.05 if at_head else 0)
             if item is None:
                 if pf.stopped():
-                    return None, True
+                    return None, None, True
                 if not at_head:
-                    return None, True      # 队列里没有目标句 → 重建比干等更快
+                    return None, None, True      # 队列里没有目标句 → 重建比干等更快
                 if time.time() > deadline:
-                    return None, True      # 队首迟迟不产出（网络慢）→ 自己合成
+                    return None, None, True      # 队首迟迟不产出（网络慢）→ 自己合成
                 continue
             ptext, paudio, pstart, _pn, pci = item[0], item[1], item[2], item[3], item[4]
+            pwords = item[5] if len(item) > 5 else []
             if ptext == text and pci == ci:
-                return paudio, False
+                return paudio, pwords, False
             if cl_off is not None and (pci, pstart) > (ci, cl_off):
-                return None, True          # 已越过目标句（文本切分不一致）→ 重建
+                return None, None, True          # 已越过目标句（文本切分不一致）→ 重建
 
     def _speak_edge(self, text, gen, ci, off, content, next_off, chapters, cl_off=None):
         """Edge 语音：整本缓存命中直接播放；否则复用预取/现场合成；失败回退系统语音。
         多人有声模式逐句独立音色，禁用批量预取（音色随句变化，预取会串音色）。"""
         cached = self._cached_audio(ci, off) if self._backend in ("edge", "external") else None
         if cached:
-            return self._speak_edge_play(cached, gen)
+            # 命中整本缓存：词表从同目录的 .words.json 读（缺文件则只有句子级高亮）
+            return self._speak_edge_play(cached, gen, self._cached_words(ci, off))
         multi_mode = self._multi_roles is not None
         audio = None
+        words = []
         if multi_mode:
             # 多人有声：逐句直接合成（按 _cur_voice 独立音色）
+            words = []
             try:
-                audio = self._edge_synthesize(text)
+                audio, words = self._edge_synthesize(text)
             except Exception:
                 audio = None
         else:
@@ -2256,7 +2328,7 @@ class SpeechController:
                 self._edge_prefetch = None
                 pf = None
             if pf is not None:
-                audio, rebuild = self._take_prefetched(
+                audio, words, rebuild = self._take_prefetched(
                     pf, text, ci, cl_off, gen, time.time() + 8
                 )
                 if rebuild:
@@ -2285,11 +2357,11 @@ class SpeechController:
                     _EdgePrefetch.MAX_AHEAD,
                 )
                 try:
-                    audio = self._edge_synthesize(text)
+                    audio, words = self._edge_synthesize(text)
                 except Exception:
                     audio = None
         if audio:
-            return self._speak_edge_play(audio, gen)
+            return self._speak_edge_play(audio, gen, words)
         # 联网失败：回退系统语音（仅提示一次）
         if not self._edge_fail_posted:
             self._edge_fail_posted = True
@@ -2305,13 +2377,21 @@ class SpeechController:
             self._edge_prefetch = None
         return self._speak_sapi(text, gen, fallback=True)
 
-    def _speak_edge_play(self, audio, gen):
-        """把一句音频字节写成临时文件，交给唯一的播放函数。"""
+    def _speak_edge_play(self, audio, gen, words=None):
+        """把一句音频字节写成临时文件，交给唯一的播放函数。
+
+        words 是这句的逐词时间轴；句首静音被裁掉多少毫秒，词表就整体前移多少，
+        否则高亮会整体偏晚（实测 edge 句头静音 ~150ms）。
+        """
         if not audio:
             return False
         if self._should_stop(gen):
             return False
-        audio = _trim_edge_silence(audio)  # 裁句首尾静音（停顿=0 时句间接近无缝）
+        audio, head_ms = _trim_edge_silence_ex(audio)  # 裁句首尾静音（停顿=0 时句间接近无缝）
+        words = shift_words(words or [], -head_ms)
+        with self._cv:
+            self._cur_words = list(words)
+            self._cur_words_gen = gen
         tmp_path = None
         try:
             suffix = ".wav" if audio[:4] == b"RIFF" else ".mp3"
@@ -2327,6 +2407,21 @@ class SpeechController:
                     os.unlink(tmp_path)
                 except Exception:
                     pass
+
+    def playback_position_ms(self):
+        """当前这句音频已播放的毫秒数（pygame 为三平台唯一播放通道）；未知返回 -1。"""
+        try:
+            return _pp_pos()
+        except Exception:
+            return -1
+
+    def current_word(self):
+        """按播放位置返回当前正在读的词（SpeechWord）；句子级/无词表时返回 None。"""
+        with self._cv:
+            words = list(self._cur_words or [])
+        if not words:
+            return None
+        return word_at(words, self.playback_position_ms())
 
     def _play_audio_file(self, path, gen):
         """唯一播放函数（Edge / GPT-SoVITS / 系统语音共用）。
@@ -2362,6 +2457,11 @@ class SpeechController:
 
 
 def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
+    """兼容旧调用：只返回音频（逐词高亮需要毫秒偏移时用 _trim_edge_silence_ex）。"""
+    return _trim_edge_silence_ex(audio, keep_head_ms, keep_tail_ms, threshold)[0]
+
+
+def _trim_edge_silence_ex(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
     """裁剪 edge_tts 音频首尾静音（2026-10-19 新增）。
 
     实测 edge_tts 每句音频自带 ~550ms 句尾静音 + ~190ms 句头静音（合成器固有），
@@ -2372,7 +2472,7 @@ def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
     - 每次 init 后保持 mixer 状态，兼容 macOS/Linux pygame 播放器懒加载。
     """
     if not audio or audio[:4] == b"RIFF":  # wav 无需处理（external 引擎输出）
-        return audio
+        return audio, 0
     try:
         import array
         import wave
@@ -2393,7 +2493,7 @@ def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
                 pass
         raw = snd.get_raw()
         if not raw or len(raw) < 64:
-            return audio
+            return audio, 0
         samples = array.array("h", raw)
         n = len(samples)
         peak = max(abs(x) for x in samples) or 1
@@ -2411,7 +2511,7 @@ def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
         head_keep = int(keep_head_ms / 1000.0 * freq)
         head_start = max(0, j - head_keep)
         if tail_end - head_start < int(0.05 * freq):  # 裁剪后过短，放弃
-            return audio
+            return audio, 0
         trimmed = samples[head_start:tail_end + 1]
         import io as _io
         buf = _io.BytesIO()
@@ -2420,9 +2520,9 @@ def _trim_edge_silence(audio, keep_head_ms=40, keep_tail_ms=90, threshold=0.02):
             w.setsampwidth(2)
             w.setframerate(freq)
             w.writeframes(trimmed.tobytes())
-        return buf.getvalue()
+        return buf.getvalue(), int(head_start * 1000.0 / freq)
     except Exception:
-        return audio
+        return audio, 0
 
 
 # ---------- Windows MCI 播放器（winmm.dll，替代 pygame，零依赖） ----------
@@ -2603,6 +2703,15 @@ def _pp_close():
     except Exception:
         pass
     _pp_paused = False
+
+
+def _pp_pos():
+    """当前音频已播放毫秒数（pygame.mixer.music.get_pos）；未播放/异常返回 -1。"""
+    try:
+        import pygame
+        return int(pygame.mixer.music.get_pos())
+    except Exception:
+        return -1
 
 
 def _pp_playing():

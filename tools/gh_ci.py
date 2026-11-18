@@ -134,6 +134,31 @@ def download(run_id, outdir):
     return rc
 
 
+def jobs(run_id):
+    r = requests.get("%s/repos/%s/%s/actions/runs/%s/jobs" % (API, OWNER, REPO, run_id),
+                     headers=headers(), proxies=PROXIES, timeout=60)
+    r.raise_for_status()
+    for j in r.json().get("jobs") or []:
+        print("job id=%s name=%s status=%s conclusion=%s" % (
+            j["id"], j["name"], j["status"], j.get("conclusion")))
+        for s in j.get("steps") or []:
+            print("    %-38s %s %s" % (s["name"], s["status"], s.get("conclusion")))
+
+
+def job_log(job_id):
+    url = "%s/repos/%s/%s/actions/jobs/%s/logs" % (API, OWNER, REPO, job_id)
+    r = requests.get(url, headers=headers(), proxies=PROXIES, timeout=300, allow_redirects=True)
+    if r.status_code >= 300:
+        print("LOG FAIL %s %s" % (r.status_code, r.text[:200]))
+        return 1
+    text = r.content.decode("utf-8", "replace")
+    lines = text.splitlines()
+    print("共 %d 行，最后 60 行：" % len(lines))
+    for ln in lines[-60:]:
+        print(ln)
+    return 0
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -142,6 +167,11 @@ def main():
     if cmd == "runs":
         runs()
         return 0
+    if cmd == "jobs":
+        jobs(sys.argv[2])
+        return 0
+    if cmd == "log":
+        return job_log(sys.argv[2])
     if cmd == "wait":
         return wait(sys.argv[2] if len(sys.argv) > 2 else None)
     if cmd == "artifacts":

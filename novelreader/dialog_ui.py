@@ -85,6 +85,10 @@ class DialogMixin:
             ("engine", _T("语音引擎"), _T("外部TTS"), self._show_engines_dialog),
             ("sync", _T("数据同步"), _T("云端/局域网"), self._show_sync_dialog),
             ("stats", _T("阅读统计"), _T("时长/字数"), self._show_stats_dialog),
+            # 逐词高亮：点一下即切换开/关（仅 Edge 语音有词级时间轴）
+            ("word", _T("逐词高亮"),
+             _T("开") if self.settings.get("word_highlight", True) else _T("关"),
+             self._toggle_word_highlight),
             ("keyboard", _T("快捷键说明"), _T("Ctrl/±"), self._show_shortcuts_dialog),
             ("changelog", _T("更新记录"), _T("版本历史"), self._show_changelog_dialog),
             ("about", _T("关于"), _T("版本/作者"), self._show_about),

@@ -695,6 +695,9 @@ class NovelReaderBase:
         self.text.pack(side="left", fill="both", expand=True)
         self.text.configure(state="disabled")
         self.text.tag_configure("tts", background="#F3C76A", foreground="#000000")
+        # 逐词高亮：叠在句子底色之上（与安卓 1.3.0 同色 #9BC5DD）。
+        # tag 在 "tts" 之后创建 → Tk 里优先级更高，所以词色会盖住句子色。
+        self.text.tag_configure("tts_word", background="#9BC5DD", foreground="#000000")
         self.text.tag_configure("bm", background="#C8E6C9", foreground="#000000")
 
         self.text.bind("<MouseWheel>", self._on_scroll)

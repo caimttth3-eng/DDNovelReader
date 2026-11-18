@@ -5,6 +5,17 @@
 
 ## 已实装（勾选留档）
 
+### v2.3.0（2026-11-18 归档）：Edge 语音逐词高亮
+
+- [x] **逐词时间轴**：新增 `novelreader/speech_word.py`（`SpeechWord` / `SpeechWordCollector` / `word_at` / `shift_words` / JSON 往返 / 清洗文本→显示文本对齐），逻辑对齐安卓 1.3.0 的 `speech_word.dart`：Edge 元数据 100ns → ms、HTML 转义还原、按顺序 indexOf 定位（重复词各有坐标）、定位不到就丢弃
+- [x] **引擎接入**：`synth_audio` 现在返回 `(audio, words)`，并**显式传 `boundary="WordBoundary"`**（edge-tts 7.x 默认只要句子边界）；拿不到词边界时保留已收音频或退回句子边界重合成，保证朗读不受影响；预取队列 / 现场合成 / 整本缓存三条路径都带上词表
+- [x] **播放对齐**：`_trim_edge_silence_ex` 返回「句首裁掉多少毫秒」，词表据此整体平移（否则高亮整体偏晚约 150ms）；`SpeechController.playback_position_ms()` 取 pygame 位置，`current_word()` 二分查当前词
+- [x] **缓存旁挂**：整本缓存写 `NNNN_OOOOOOOO.words.json`（与 mp3 同名），命中缓存时读取；老缓存没有该文件自动退回整句高亮
+- [x] **两色显示**：句子 `tts` 标签（#F3C76A）+ 词 `tts_word` 标签（#9BC5DD，与安卓同色），Tk 后创建的标签优先级更高所以词色盖住句子色；`reader_ui._word_tick` 每 60ms 刷一次（主线程 `after`，不跨线程碰 Tk）
+- [x] **开关**：设置面板新增「逐词高亮」行（点击即切换，落盘 `word_highlight`），关掉立即清除词层
+- [x] **顺手修**：句子起点落在换行/空白上时，显示窗口只剩 1 个字符导致整句不亮（现先跳过前导空白再取窗口）
+- [x] **回归**：`tests/test_speech_word.py` 31 项、`tests/test_word_highlight.py` 17 项（含真实 Edge 合成拿到词表、GUI 两色共存与开关）；另有 `_verify_word_hl.py` 真机验证（真开书 → 真朗读 → 连续命中词 + 截图）
+
 ### v2.2.9（2026-11-18 归档）：局域网本地同步（不用网盘）+ 修 2.2.8 界面错述
 
 - [x] **同步数据并入缓存目录（用户 2026-11-18 要求）**：局域网同步数据从 `<数据目录>/lan` 迁到 `<缓存根>/lan`，使"缓存类"文件全部落在一个可自定义的目录里，用户删缓存时能一次清干净；`storage` 新增 `lan_dir()` / `legacy_lan_dir()` / `migrate_legacy_lan_dir()`（幂等、新位置优先、冲突保留新文件）；升级后首次启动自动迁移，`缓存管理 → 同步数据（局域网）`卡片提供「打开文件夹 / 迁移旧数据 / 清除」，卡片位置标注「跟随缓存目录」；`library.json`、`stats.json`、`custom.ico` 等用户数据**不动**（用户明确要求其他配置文件不改）

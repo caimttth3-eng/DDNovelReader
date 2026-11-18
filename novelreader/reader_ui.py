@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """阅读区：书籍加载 / 章节渲染 / 进度 / 滚动 / 高亮跟随 / 分页 / 定时保存（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -23,6 +23,7 @@ from .storage import (
     audio_cache_dirs,
 )
 from .tts_engine import SpeechController
+from .speech_word import align_to_display
 from .i18n import T as _T
 from .constants import (
     THEMES,
@@ -623,33 +624,64 @@ class ReaderMixin:
         content = self.book.chapters[ci].content
         line, col = self._transformed_pos(content, off)
         start = f"{line}.{col}"
-        # 结束位置：直接从 start 在显示文本中向后读取，遇到句末标点即停。
+        # 起点可能正好落在换行/空白上（段首缩进、空行模式），先跳过前导空白再取窗口，
+        # 否则窗口只剩一个换行符，句子色只染一个字符、逐词对齐也全失败。
+        anchor = start
+        try:
+            limit_walk = 0
+            while limit_walk < 8:
+                ch = self.text.get(anchor, f"{anchor}+1c")
+                if not ch or not ch.isspace():
+                    break
+                nxt = self.text.index(f"{anchor}+1c")
+                if self.text.compare(nxt, ">=", "end-1c"):
+                    break
+                anchor = nxt
+                limit_walk += 1
+        except Exception:
+            anchor = start
+        # 结束位置：直接从 anchor 在显示文本中向后读取，遇到句末标点即停。
         # （显示文本保留标点/空白，纯净朗读文本去除了它们，长度不一致，
         #   不能直接用 len(text) 定位结束。）
-        end = start
+        end = anchor
         try:
-            # 在显示文本里从 start 向后扫，遇到句末标点即停。
             # 窗口长度用 len(text)+40 估算（显示文本多出标点/空白），并钳到正文末位，
             # 否则章末最后几句取窗会越界抛 TclError，整句落不上色。
             limit = len(text) + 40
-            probe_end = self.text.index(f"{start}+{limit}c")
+            probe_end = self.text.index(f"{anchor}+{limit}c")
             if self.text.compare(probe_end, ">", "end-1c"):
                 probe_end = "end-1c"
-            window = self.text.get(start, probe_end)
+            window = self.text.get(anchor, probe_end)
             found = False
             for i, ch in enumerate(window):
                 if ch in "。！？.!?；;\n":
-                    end = self.text.index(f"{start}+{i+1}c")
+                    end = self.text.index(f"{anchor}+{i+1}c")
                     found = True
                     break
-            if not found and self.text.compare(probe_end, ">", start):
+            if not found and self.text.compare(probe_end, ">", anchor):
                 end = probe_end
         except Exception:
-            end = start
+            end = anchor
+        if self.text.compare(end, "<=", anchor):
+            # 兜底：窗口算不出有效范围时退回原始起点，至少句子色能落上
+            anchor = start
+            try:
+                end = self.text.index(f"{start}+1c")
+            except Exception:
+                end = start
         self.text.tag_remove("tts", "1.0", "end")
-        self.text.tag_add("tts", start, end)
-        self._highlight_index = (ci, start)
-        self._pin_highlight_top(start)
+        self.text.tag_add("tts", anchor, end)
+        self._highlight_index = (ci, anchor)
+        # 逐词高亮上下文：句子在显示文本里的起点 + 该句显示文本 + 朗读（清洗）文本
+        disp = ""
+        try:
+            disp = self.text.get(anchor, end)
+        except Exception:
+            disp = ""
+        self._word_ctx = {"ci": ci, "start": anchor, "clean": text or "",
+                          "display": disp, "map": None}
+        self._start_word_tick()
+        self._pin_highlight_top(anchor)
     def _pin_highlight_top(self, start):
         """把高亮所在显示行钉到窗口第一行（兼容所有空行模式）。
 
@@ -695,10 +727,108 @@ class ReaderMixin:
         self._resize_timer = None
         self._pending_seek_pct = None
         self._status_scroll_timer = None
+        self._stop_word_tick()
+        self._clear_word_tag()
         try:
             self.text.tag_remove("tts", "1.0", "end")
         except Exception:
             pass
+
+    # ---------------- 逐词高亮（仅 Edge 语音有词级时间轴） ----------------
+    def _start_word_tick(self):
+        """开始按播放位置刷新当前词（60ms 一次，只读 pygame 位置，开销极小）。"""
+        try:
+            if not self.settings.get("word_highlight", True):
+                return
+        except Exception:
+            return
+        self._stop_word_tick()
+        try:
+            self._word_after = self.root.after(60, self._word_tick)
+        except Exception:
+            self._word_after = None
+
+    def _stop_word_tick(self):
+        if getattr(self, "_word_after", None):
+            try:
+                self.root.after_cancel(self._word_after)
+            except Exception:
+                pass
+            self._word_after = None
+
+    def _clear_word_tag(self):
+        try:
+            self.text.tag_remove("tts_word", "1.0", "end")
+        except Exception:
+            pass
+
+    def _word_map(self):
+        """朗读文本下标 → 显示文本下标的映射（按句缓存，避免每 tick 重算）。"""
+        ctx = getattr(self, "_word_ctx", None)
+        if not ctx:
+            return None
+        if ctx.get("map") is None:
+            try:
+                ctx["map"] = align_to_display(ctx.get("clean") or "", ctx.get("display") or "")
+            except Exception:
+                ctx["map"] = []
+        return ctx.get("map")
+
+    def _word_tick(self):
+        """定时把"当前正在读的词"叠色到句子高亮之上。"""
+        self._word_after = None
+        try:
+            if not self.book or not self.tts.is_playing():
+                self._clear_word_tag()
+                return
+            if not self.settings.get("word_highlight", True):
+                self._clear_word_tag()
+                return
+            ctx = getattr(self, "_word_ctx", None)
+            word = None
+            try:
+                word = self.tts.current_word()
+            except Exception:
+                word = None
+            if word is not None and ctx and ctx.get("ci") == self.chapter_idx:
+                mapping = self._word_map() or []
+                s_i = word.text_start
+                e_i = min(word.text_end, len(mapping))
+                if 0 <= s_i < len(mapping) and mapping[s_i] >= 0:
+                    ds = mapping[s_i]
+                    if 0 < e_i <= len(mapping) and mapping[e_i - 1] >= 0:
+                        de = mapping[e_i - 1] + 1
+                    else:
+                        de = ds + 1
+                    if de > ds:
+                        self._clear_word_tag()
+                        start = ctx["start"]
+                        self.text.tag_add("tts_word",
+                                          "%s+%dc" % (start, ds), "%s+%dc" % (start, de))
+            self._word_after = self.root.after(60, self._word_tick)
+        except Exception:
+            self._word_after = None
+
+    def _toggle_word_highlight(self):
+        """设置面板：逐词高亮 开 / 关（即时生效）。"""
+        cur = True
+        try:
+            cur = bool(self.settings.get("word_highlight", True))
+        except Exception:
+            pass
+        new = not cur
+        self.settings["word_highlight"] = new
+        try:
+            self.storage.set_setting("word_highlight", new)
+        except Exception:
+            pass
+        if new:
+            self._start_word_tick()
+            self._flash_status(_T("逐词高亮已开启"))
+        else:
+            self._stop_word_tick()
+            self._clear_word_tag()
+            self._flash_status(_T("逐词高亮已关闭"))
     def _shortcut_read_from_paragraph(self):
         """快捷键：从当前屏顶部所在段落起点开始朗读。"""
         if not self.book:
