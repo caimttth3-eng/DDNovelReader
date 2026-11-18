@@ -189,16 +189,22 @@ class DialogMixin:
             tk.Label(head, text=title, font=("微软雅黑", 11, "bold"), fg=accent, bg=_card_bg).pack(side="left", padx=(6, 0))
             loc_lbl = tk.Label(head, text="", font=("微软雅黑", 9), fg="#999999", bg=_card_bg)
             loc_lbl.pack(side="right")
+            if kind == "lan":
+                loc_lbl.configure(text=_T("跟随缓存目录"))
 
             if subtitle:
                 tk.Label(card, text=subtitle, font=("微软雅黑", 9), fg="#888888", bg=_card_bg,
                          wraplength=580, justify="left").pack(anchor="w", padx=14, pady=(0, 4))
 
-            path_text = self._effective_text_cache_root() if kind == "text" else self._effective_tts_cache_root()
+            path_text = (self._effective_text_cache_root() if kind == "text"
+                         else self._effective_tts_cache_root() if kind == "audio"
+                         else self._lan_data_root())
             path_lbl = tk.Label(card, text=path_text, font=("微软雅黑", 9), fg="#2b6cb0",
                                 bg=_card_bg, wraplength=580, justify="left", cursor="hand2")
             path_lbl.pack(anchor="w", padx=14, pady=(2, 2))
-            open_cmd = self._open_cache_folder if kind == "text" else self._open_tts_cache_folder
+            open_cmd = (self._open_cache_folder if kind == "text"
+                        else self._open_tts_cache_folder if kind == "audio"
+                        else self._open_lan_folder)
             path_lbl.bind("<Button-1>", lambda e: open_cmd())
 
             size_lbl = tk.Label(card, text=_T("正在统计…"), font=("微软雅黑", 10), fg="#444444", bg=_card_bg)
@@ -215,6 +221,16 @@ class DialogMixin:
                            command=self._open_cache_folder).pack(side="left", padx=(8, 0))
                 ttk.Button(btn_row, text=_T("清除"),
                            command=lambda: self._clear_cache(size_lbl)).pack(side="left", padx=(8, 0))
+            elif kind == "lan":
+                # 局域网同步数据：位置跟随缓存目录（<缓存根>/lan），故不提供"自定义/转移"，
+                # 只给 打开文件夹 / 迁移旧数据（把 <数据目录>/lan 搬进来）/ 清除。
+                ttk.Button(btn_row, text=_T("打开文件夹"),
+                           command=self._open_lan_folder).pack(side="left")
+                ttk.Button(btn_row, text=_T("迁移旧数据"),
+                           command=lambda: self._migrate_lan_data_click(size_lbl, path_lbl)
+                           ).pack(side="left", padx=(8, 0))
+                ttk.Button(btn_row, text=_T("清除"),
+                           command=lambda: self._clear_lan_data(size_lbl)).pack(side="left", padx=(8, 0))
             else:
                 ttk.Button(btn_row, text=_T("自定义位置"),
                            command=lambda: self._choose_tts_cache_folder(path_lbl, tts_size_lbl)).pack(side="left")
@@ -244,6 +260,22 @@ class DialogMixin:
             accent="#b00020",
             kind="audio",
         )
+        # 局域网同步数据卡片（v2.2.9 新增）
+        lan_path_lbl, lan_size_lbl, loc_lbl3 = _make_cache_card(
+            body,
+            title=_T("同步数据（局域网）"),
+            subtitle=_T("局域网同步的记录与书源文件（手机同步过来的书也在这里）；清除后需重新同步一次。"),
+            icon="📡",
+            accent="#0f766e",
+            kind="lan",
+        )
+
+        # 一次性清理全部缓存（正文解析 + 音频 + 局域网同步数据）
+        all_row = tk.Frame(body, bg=_bg)
+        all_row.pack(fill="x", padx=6, pady=(0, 6))
+        ttk.Button(all_row, text=_T("一键清理全部缓存"),
+                   command=lambda: self._clear_all_caches(size_lbl, tts_size_lbl, lan_size_lbl)
+                   ).pack(side="right")
 
         def _fit_window():
             """按 body 真实请求尺寸贴合窗口并居中（内容变高时窗口跟着长）。"""
@@ -256,8 +288,10 @@ class DialogMixin:
         def _refresh_sizes():
             self._update_cache_size_label(size_lbl)
             self._update_tts_cache_size_label(tts_size_lbl)
+            self._update_lan_size_label(lan_size_lbl)
             loc_lbl1.configure(text=_T("自定义位置") if self.settings.get("cache_dir") else _T("默认位置"))
             loc_lbl2.configure(text=_T("自定义位置") if self.settings.get("tts_cache_dir") else _T("默认位置"))
+            loc_lbl3.configure(text=_T("跟随缓存目录"))
             _fit_window()
 
         _fit_window()
@@ -308,6 +342,16 @@ class DialogMixin:
         tsb.pack(side="right", fill="y")
         txt.pack(side="left", fill="both", expand=True)
         txt.insert("end", version_info.format_history())
+        # 红字强调：【重要】开头的条目用红色显示（数据位置变更这类必须让用户看见的说明）
+        try:
+            txt.tag_configure("important", foreground="#C00000")
+            total = int(txt.index("end-1c").split(".")[0])
+            for i in range(1, total + 1):
+                line = txt.get("%d.0" % i, "%d.end" % i)
+                if "【重要】" in line:
+                    txt.tag_add("important", "%d.0" % i, "%d.end" % i)
+        except Exception:
+            pass
         txt.configure(state="disabled")
         top.focus_set()
 

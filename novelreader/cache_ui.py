@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """缓存管理：正文 / 音频缓存文件夹自定义、一键转移、清除、大小统计（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -264,6 +264,237 @@ class CacheMixin:
             self.tts_cache_label.configure(text=_T("语音缓存 {a}/{b}").format(a=pr[0], b=pr[1]))
         else:
             self.tts_cache_label.configure(text="")
+    def _lan_data_root(self):
+        """局域网同步数据的落盘目录：`<正文缓存根>/lan`（与 cache/ 内容同根，可自定义位置）。
+
+        v2.2.9 起：从旧的 <数据目录>/lan 迁到这里，目的是让所有缓存类文件都在
+        一个可自定义的目录里，用户删缓存时能一次清干净（其余 library.json /
+        stats.json / custom.ico 属用户数据，不参与清理）。
+        目录结构：lan/<远端目录>/v1/{books,devices,sources}。
+        """
+        from .storage import lan_dir
+        return lan_dir(self.storage.get_setting("cache_dir") or "")
+
+    def _open_lan_folder(self):
+        d = self._lan_data_root()
+        try:
+            os.makedirs(d, exist_ok=True)
+            import subprocess, sys
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", d])
+            else:
+                subprocess.Popen(["xdg-open", d])
+        except Exception as e:
+            messagebox.showerror(_T("无法打开"), _T("打开局域网同步文件夹失败：{e}").format(e=e))
+
+    def _lan_data_usage(self):
+        """返回 (字节数, 文件数)；目录不存在返回 (0, 0)。"""
+        root = self._lan_data_root()
+        total = 0
+        count = 0
+        try:
+            for base, _dirs, files in os.walk(root):
+                for f in files:
+                    count += 1
+                    try:
+                        total += os.path.getsize(os.path.join(base, f))
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        return total, count
+
+    def _update_lan_size_label(self, lbl):
+        """异步统计局域网同步数据体积（记录 + 书源文件），结果回 Tk 主线程。"""
+        def _work():
+            size, count = self._lan_data_usage()
+            text = _T("占用 {size}（{n} 个文件）").format(size=self._format_bytes(size), n=count)
+            try:
+                self.root.after(0, lambda: lbl.configure(text=text))
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _clear_lan_data(self, size_lbl=None):
+        """清除局域网同步数据（记录 + 书源文件）；不影响本机书架与进度。"""
+        if not messagebox.askyesno(
+                _T("清除同步数据"),
+                _T("确定清除局域网同步数据？\n\n"
+                   "· 电脑端的书架、阅读进度、书签不受影响\n"
+                   "· 手机端独有的书需要重新同步一次才会回到这里")):
+            return
+        import shutil
+        root = self._lan_data_root()
+        n = 0
+        try:
+            if os.path.isdir(root):
+                _size, n = self._lan_data_usage()
+                shutil.rmtree(root, ignore_errors=True)
+        except Exception:
+            pass
+        if size_lbl is not None:
+            self._update_lan_size_label(size_lbl)
+        messagebox.showinfo(_T("已清除"), _T("已清除 {n} 个缓存文件。").format(n=n))
+
+    def _legacy_lan_pending(self):
+        """旧位置（<数据目录>/lan）里待迁移的文件数；没有则 0。"""
+        from .storage import legacy_lan_dir
+        old = legacy_lan_dir()
+        new = self._lan_data_root()
+        if not os.path.isdir(old):
+            return 0
+        if os.path.normcase(os.path.abspath(old)) == os.path.normcase(os.path.abspath(new)):
+            return 0
+        n = 0
+        for _base, _dirs, files in os.walk(old):
+            n += len(files)
+        return n
+
+    def _migrate_lan_data_click(self, size_lbl=None, path_lbl=None):
+        """手动把旧位置 <数据目录>/lan 迁到当前缓存目录（自动迁移失败/换过缓存盘时用）。"""
+        from .storage import migrate_legacy_lan_dir
+        n = self._legacy_lan_pending()
+        if not n:
+            messagebox.showinfo(_T("迁移同步数据"),
+                                _T("没有需要迁移的旧数据（旧位置不存在或已迁移过）。"))
+            return
+        if not messagebox.askyesno(
+                _T("迁移同步数据"),
+                _T("将把旧位置的 {n} 个同步文件迁移到当前缓存目录：\n{d}\n\n"
+                   "迁移后旧目录会被删除；如已开启局域网同步会自动重启服务。继续？").format(
+                    n=n, d=self._lan_data_root())):
+            return
+        running = False
+        try:
+            from .lan_server import ST_RUNNING
+            running = self._lan_status().get("state") == ST_RUNNING
+        except Exception:
+            running = False
+        if running:
+            self._lan_stop()
+        res = migrate_legacy_lan_dir(self.storage.get_setting("cache_dir") or "")
+        if running or self.storage.get_setting("lan_enabled", False):
+            try:
+                self._lan_start(quiet=True)
+            except Exception:
+                pass
+        if path_lbl is not None:
+            path_lbl.configure(text=self._lan_data_root())
+        if size_lbl is not None:
+            self._update_lan_size_label(size_lbl)
+        if res.get("moved"):
+            messagebox.showinfo(_T("迁移同步数据"),
+                                _T("已迁移 {n} 个文件到：\n{d}").format(
+                                    n=res.get("files", 0), d=res.get("to") or self._lan_data_root()))
+        else:
+            messagebox.showwarning(_T("迁移同步数据"),
+                                   _T("迁移未完成：{e}").format(e=res.get("reason") or "未知原因"))
+
+    # ---------------- 内部清理（无弹窗，供单个清除与"一键全部清理"复用） ----------------
+    def _purge_text_cache(self):
+        """删除正文解析缓存文件，返回删除数。"""
+        d = self._effective_text_cache_root()
+        n = 0
+        try:
+            for f in os.listdir(d):
+                p = os.path.join(d, f)
+                if os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                        n += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return n
+
+    def _purge_tts_cache(self):
+        """删除音频缓存目录项（保留大小索引由 invalidate 处理），返回删除数。"""
+        import shutil
+        root = self._effective_tts_cache_root()
+        n = 0
+        try:
+            for name in os.listdir(root):
+                if name.startswith(".tts_sizes"):
+                    continue
+                p = os.path.join(root, name)
+                try:
+                    if os.path.isdir(p):
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        os.remove(p)
+                    n += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            self.tts.tts_cache_invalidate()
+        except Exception:
+            pass
+        return n
+
+    def _purge_lan_cache(self):
+        """删除局域网同步数据目录，返回删除的文件数。"""
+        import shutil
+        root = self._lan_data_root()
+        n = 0
+        try:
+            if os.path.isdir(root):
+                _size, n = self._lan_data_usage()
+                shutil.rmtree(root, ignore_errors=True)
+        except Exception:
+            pass
+        return n
+
+    def _clear_all_caches(self, text_lbl=None, tts_lbl=None, lan_lbl=None):
+        """一键清理全部缓存：正文解析 + 音频 + 局域网同步数据（一次确认，全部清掉）。"""
+        try:
+            text_size = dir_size(self._effective_text_cache_root())
+        except Exception:
+            text_size = 0
+        try:
+            tts_size = self.tts.tts_cache_size()
+        except Exception:
+            tts_size = dir_size(self._effective_tts_cache_root())
+        lan_size, lan_cnt = self._lan_data_usage()
+        total = text_size + tts_size + lan_size
+        if not messagebox.askyesno(
+                _T("清理全部缓存"),
+                _T("将一次性清理全部缓存，合计 {size}：\n\n"
+                   "· 正文解析缓存 {a}\n"
+                   "· 音频缓存 {b}\n"
+                   "· 局域网同步数据 {c}（{n} 个文件）\n\n"
+                   "影响：下次打开书籍需重新解析；整本语音缓存需重新下载；"
+                   "手机端独有的书需重新同步一次。\n"
+                   "书架、阅读进度、书签与设置不受影响。继续？").format(
+                    size=self._format_bytes(total),
+                    a=self._format_bytes(text_size),
+                    b=self._format_bytes(tts_size),
+                    c=self._format_bytes(lan_size),
+                    n=lan_cnt)):
+            return
+        n_text = self._purge_text_cache()
+        n_tts = self._purge_tts_cache()
+        n_lan = self._purge_lan_cache()
+        if text_lbl is not None:
+            self._update_cache_size_label(text_lbl)
+        if tts_lbl is not None:
+            self._update_tts_cache_size_label(tts_lbl)
+        if lan_lbl is not None:
+            self._update_lan_size_label(lan_lbl)
+        try:
+            self._refresh_bookshelf()
+        except Exception:
+            pass
+        messagebox.showinfo(
+            _T("已清除"),
+            _T("已清理全部缓存：正文 {a} 个文件 / 音频 {b} 项 / 同步数据 {c} 个文件").format(
+                a=n_text, b=n_tts, c=n_lan))
+
     def _on_status_cache_click(self, event=None):
         """点击右下角整本缓存状态：在 暂停/继续 之间切换下载。"""
         try:

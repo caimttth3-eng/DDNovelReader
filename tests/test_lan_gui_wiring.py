@@ -117,7 +117,56 @@ def main():
     dlg._on_close()
     root.update_idletasks()
 
-    # 6) 看门狗：置脏后触发一次合并不崩、锁最终释放
+    # 6) 缓存管理窗口：新增「同步数据（局域网）」卡片 + 迁移按钮 + 路径跟随缓存目录
+    app._show_cache_manager_dialog()
+    root.update_idletasks()
+    cache_dlg = None
+    for w in root.winfo_children():
+        if isinstance(w, tk.Toplevel):
+            try:
+                if w.winfo_exists() and "缓存管理" in w.title():
+                    cache_dlg = w
+                    break
+            except Exception:
+                pass
+    check("缓存管理窗口已打开", cache_dlg is not None)
+
+    def _walk(widget, acc):
+        try:
+            acc.append(widget)
+            for c in widget.winfo_children():
+                _walk(c, acc)
+        except Exception:
+            pass
+        return acc
+
+    texts = []
+    if cache_dlg is not None:
+        for w in _walk(cache_dlg, []):
+            try:
+                t = w.cget("text")
+                if t:
+                    texts.append(str(t))
+            except Exception:
+                pass
+    check("缓存管理有「同步数据（局域网）」卡片", any("同步数据（局域网）" in t for t in texts),
+          texts[:12])
+    check("卡片显示路径在缓存目录下",
+          any(("cache" + os.sep + "lan") in t for t in texts), [t for t in texts if "lan" in t][:3])
+    check("卡片有「迁移旧数据」按钮", any(t == "迁移旧数据" for t in texts))
+    check("卡片标注位置跟随缓存目录", any("跟随缓存目录" in t for t in texts))
+    check("有「一键清理全部缓存」按钮", any(t == "一键清理全部缓存" for t in texts))
+    check("三张卡片齐全",
+          all(any(k in t for t in texts) for k in ("正文解析缓存", "音频缓存", "同步数据（局域网）")),
+          [t for t in texts if "缓存" in t][:8])
+    if cache_dlg is not None:
+        try:
+            cache_dlg.destroy()
+        except Exception:
+            pass
+    root.update_idletasks()
+
+    # 7) 看门狗：置脏后触发一次合并不崩、锁最终释放
     app._lan_srv.take_dirty()
     app._lan_srv.mark_dirty()
     app._lan_watch_tick()

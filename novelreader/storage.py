@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """数据层：书架、阅读进度自动保存、全局设置、解析缓存。"""
 import hashlib
 import json
@@ -60,6 +60,66 @@ def resolve_tts_cache_dir(custom):
             d = tts_cache_dir()
         return d
     return tts_cache_dir()
+
+
+# ---------------------------------------------------------------- 局域网同步数据目录
+# v2.2.9：局域网同步数据从 <数据目录>/lan 迁到「正文缓存根/lan」，
+# 目的是让所有"缓存类"文件都落在一个可自定义位置的目录里，用户删缓存时能一次清干净。
+# 注意：library.json / stats.json / custom.ico 等仍留在 <数据目录>，它们是用户数据，不是缓存。
+
+def legacy_lan_dir():
+    """旧位置（v2.2.9 之前/首发版本）：<数据目录>/lan。"""
+    return os.path.join(data_dir(), "lan")
+
+
+def lan_dir(custom_cache=None):
+    """局域网同步数据目录：`<正文缓存根>/lan`（跟着 cache_dir 自定义一起走）。"""
+    return os.path.join(resolve_cache_dir(custom_cache), "lan")
+
+
+def migrate_legacy_lan_dir(custom_cache=None):
+    """把旧位置 <数据目录>/lan 迁到 <缓存根>/lan。
+
+    幂等：新位置已存在的同名文件保留（视为更新），旧位置迁完即删。
+    返回 {"moved": bool, "files": n, "from": ..., "to": ..., "reason": ...}
+    """
+    old = legacy_lan_dir()
+    new = lan_dir(custom_cache)
+    same = os.path.normcase(os.path.abspath(old)) == os.path.normcase(os.path.abspath(new))
+    if same:
+        return {"moved": False, "files": 0, "from": old, "to": new, "reason": "same-dir"}
+    if not os.path.isdir(old):
+        return {"moved": False, "files": 0, "from": old, "to": new, "reason": "no-legacy"}
+    moved = 0
+    failed = 0
+    try:
+        os.makedirs(new, exist_ok=True)
+        for base, _dirs, files in os.walk(old):
+            rel = os.path.relpath(base, old)
+            target_base = new if rel == "." else os.path.join(new, rel)
+            try:
+                os.makedirs(target_base, exist_ok=True)
+            except OSError:
+                failed += len(files)
+                continue
+            for name in files:
+                src = os.path.join(base, name)
+                dst = os.path.join(target_base, name)
+                if os.path.exists(dst):
+                    continue          # 新位置已有：保留更新的那份
+                try:
+                    import shutil
+                    shutil.move(src, dst)
+                    moved += 1
+                except Exception:
+                    failed += 1
+        if not failed:
+            import shutil
+            shutil.rmtree(old, ignore_errors=True)
+    except Exception as e:                      # noqa: BLE001
+        return {"moved": bool(moved), "files": moved, "from": old, "to": new, "reason": str(e)}
+    return {"moved": True, "files": moved, "from": old, "to": new,
+            "reason": "" if not failed else "%d 个文件迁移失败" % failed}
 
 
 def dir_size(path):

@@ -15,7 +15,7 @@ from tkinter import messagebox, ttk
 
 from .i18n import T as _T
 from .constants import UI_THEMES, make_scrollbar
-from .storage import data_dir
+from .storage import data_dir, lan_dir, migrate_legacy_lan_dir
 from .lan_server import (
     LanServer, DEFAULT_PORT, DEFAULT_USER, DEFAULT_REMOTE_DIR as LAN_REMOTE_DIR,
     LAN_ROOT_DIRNAME, new_token, ST_RUNNING, ST_STOPPED, ST_STARTING, ST_ERROR,
@@ -70,8 +70,29 @@ class SyncMixin:
         return s
 
     def _lan_root(self):
-        """内嵌服务的根目录：<数据目录>/lan（只暴露同步数据，绝不暴露 library.json）。"""
-        return os.path.join(data_dir(), LAN_ROOT_DIRNAME)
+        """内嵌服务的根目录：`<正文缓存根>/lan`（与正文缓存同在可自定义的目录里）。
+
+        这样用户在「缓存管理」里把缓存挪到别的盘时，局域网同步数据跟着走；
+        删缓存时也能一起清掉。旧位置（<数据目录>/lan）由 _lan_migrate_legacy 自动迁移。
+        """
+        return lan_dir(self.settings.get("cache_dir") or "")
+
+    def _lan_migrate_legacy(self, quiet=True):
+        """把旧位置 <数据目录>/lan 迁到 <缓存根>/lan（幂等；服务运行中会先停再迁再启）。"""
+        try:
+            res = migrate_legacy_lan_dir(self.settings.get("cache_dir") or "")
+        except Exception as e:                                   # noqa: BLE001
+            return {"moved": False, "reason": str(e)}
+        if res.get("moved"):
+            try:
+                self.settings["lan_last_migrate"] = {
+                    "files": res.get("files", 0), "to": res.get("to"), "time": time.time()}
+                self.storage.set_setting("lan_last_migrate", self.settings["lan_last_migrate"])
+            except Exception:
+                pass
+            if not quiet:
+                self._flash_status(_T("已迁移 {n} 个同步文件到缓存目录").format(n=res.get("files", 0)))
+        return res
 
     # ---------------- 服务端生命周期 ----------------
     def _lan_server_obj(self, recreate=False):
@@ -109,6 +130,7 @@ class SyncMixin:
             srv = self._lan_server_obj()
             if srv.running():
                 return True, ""
+            self._lan_migrate_legacy(quiet=True)      # 服务起来前先把旧位置数据搬好
             ok, err = srv.start()
             if not ok:
                 try:
@@ -143,6 +165,7 @@ class SyncMixin:
     def _lan_auto_start(self):
         """软件启动后调用：开了局域网同步就自动开服并挂上"变更即合并"的看门狗。"""
         try:
+            self._lan_migrate_legacy(quiet=True)   # 先把旧位置（<数据目录>/lan）搬到缓存目录
             if not self.settings.get("lan_enabled", False):
                 return
             self._lan_defaults()
