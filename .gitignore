@@ -75,3 +75,15 @@ _release_*.json
 # 凭证与密钥（绝不入库）
 _gh_token.txt
 
+# 测试在项目根留下的临时目录/文件（mock WebDAV、同步、缓存布局等，2026-11-18 清理后发现）
+/dd_dav_*/
+/dd_sync_test_*/
+/ddlay_*/
+/ddmig_*/
+/ddflow_*/
+/ddgui_*/
+/_cross_ctx_*.json
+/_pack_tts_probe.*
+# 打包交付的当前版本 zip（release 上有存档，本地只暂存）
+/_*.zip
+
