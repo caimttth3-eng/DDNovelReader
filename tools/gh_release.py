@@ -85,6 +85,42 @@ def assets(release_id):
         print("%s | %s | %.2f MB | state=%s" % (a["name"], a["id"], a["size"] / 1048576.0, a["state"]))
 
 
+def delete_assets(release_id, only=None):
+    """删除该 Release 下的资产；only 给名字列表时只删这些，None 表示全删。"""
+    r = requests.get("%s/repos/%s/%s/releases/%s/assets" % (API, OWNER, REPO, release_id),
+                     headers=headers(), proxies=PROXIES, timeout=60)
+    r.raise_for_status()
+    items = r.json()
+    if only is not None:
+        items = [a for a in items if a["name"] in only]
+    if not items:
+        print("没有要删除的资产")
+        return 0
+    rc = 0
+    for a in items:
+        d = requests.delete("%s/repos/%s/%s/releases/assets/%s" % (API, OWNER, REPO, a["id"]),
+                            headers=headers(), proxies=PROXIES, timeout=120)
+        if d.status_code >= 300:
+            print("DELETE FAIL %s %s %s" % (a["name"], d.status_code, d.text[:200]))
+            rc = 1
+        else:
+            print("deleted %s (%s)" % (a["name"], a["id"]))
+    return rc
+
+
+def update_body(release_id, body_file):
+    """只改 Release 说明文字，标签订题版本号都不动。"""
+    body = io.open(body_file, encoding="utf-8").read()
+    r = requests.patch("%s/repos/%s/%s/releases/%s" % (API, OWNER, REPO, release_id),
+                       headers=headers(), proxies=PROXIES, timeout=120,
+                       data=json.dumps({"body": body}, ensure_ascii=False).encode("utf-8"))
+    if r.status_code >= 300:
+        print("UPDATE FAIL %s %s" % (r.status_code, r.text[:300]))
+        return 1
+    print("body updated, chars=%d" % len(body))
+    return 0
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -100,6 +136,10 @@ def main():
     if cmd == "assets":
         assets(sys.argv[2])
         return 0
+    if cmd == "delete-assets":
+        return delete_assets(sys.argv[2], sys.argv[3:] or None)
+    if cmd == "update-body":
+        return update_body(sys.argv[2], sys.argv[3])
     print("unknown command")
     return 2
 

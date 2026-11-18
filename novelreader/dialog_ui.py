@@ -339,7 +339,8 @@ class DialogMixin:
         _bg = UI_THEMES.get(self.settings.get("ui_theme", "D·原生微调"), UI_THEMES["D·原生微调"])["bg"]
         top.configure(bg=_bg)
 
-        txt = tk.Text(top, wrap="word", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
+        # wrap="char"：中文没有空格，用 word 换行时 Tk 会把行首的「· 」单独挤成一行
+        txt = tk.Text(top, wrap="char", padx=12, pady=10, relief="flat", font=("微软雅黑", 10))
         tsb = make_scrollbar(top, txt.yview)
         txt.configure(yscrollcommand=tsb.set)
         tsb.pack(side="right", fill="y")
