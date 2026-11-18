@@ -27,6 +27,15 @@ import urllib.request
 import time
 import sys
 
+# 跨端稳定命名：缓存一级目录用 content_key，语速目录用合成百分比。
+# 实现只在 content_key.py 一份（WebDAV 同步的 content_key 与它同源）。
+from .content_key import (
+    compute_content_key,
+    rate_dir_key,
+    content_key_of_chapters,
+    content_key_of_book,
+)
+
 # 惰性导入：pyttsx3 / edge_tts / pycaw 都是"用到才需要"的重依赖
 # （edge_tts 含 aiohttp 实测 438ms、pycaw 131ms，pyttsx3 走 COM 也不轻）。
 # 启动路径只建 SpeechController，不朗读也不出声，因此一律推迟到首次使用时导入。
@@ -553,17 +562,21 @@ class WholeBookCacher:
 
     def __init__(self, book, book_id, cache_root, voice, rate, chapter_indices=None,
                  bump_cb=None, size_cb=None, flush_cb=None, preset_tasks=None,
-                 workers=None, is_external=False):
+                 workers=None, is_external=False, cache_key=None):
         if workers:
             self.WORKERS = workers
         self._book = book
-        self._book_id = str(book_id or "book")
+        self._book_id = str(book_id or "book")  # 书架 id：只用于 GUI 索引，不参与缓存路径
+        # 缓存一级目录键 = content_key（跨端/跨机器稳定）；缺省回退书架 id，保持旧调用可用
+        self._cache_key = str(cache_key or self._book_id)
         self._is_external = is_external
-        # 每本书一个顶层目录：<cache_root>/<book_id>/<语音>/<语速>/
+        # 每本书一个顶层目录：<cache_root>/<content_key>/<语音>/<语速百分比>/
+        # 语速目录名 = 实际合成百分比（rate_dir_key），与安卓端对齐；
         # external voice_id 很长（ext:gptsovits:...），用 hash 缩短
         _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_external else _sanitize_name(voice)
+        self._rate_dir = rate_dir_key(rate)
         self._dir = os.path.join(
-            cache_root, self._book_id, _vdir, str(int(rate))
+            cache_root, self._cache_key, _vdir, self._rate_dir
         )
         self._voice = voice
         self._rate = int(rate)
@@ -601,7 +614,11 @@ class WholeBookCacher:
         return os.path.join(self._dir, "progress.json")
 
     def _load_progress(self):
-        """加载持久化进度，返回 (done_count, completed_set) 或 None。"""
+        """加载持久化进度，返回 (done_count, completed_set) 或 None。
+
+        键名双向兼容：PC 旧文件写 book_id（整数语速），安卓写 bookId（倍率语速）；
+        迁移到 content_key 后，两者都按「content_key + 语速百分比」校验。
+        """
         try:
             p = self._progress_path()
             if not os.path.exists(p):
@@ -611,10 +628,24 @@ class WholeBookCacher:
             # 只有任务总数匹配时才复用进度（章节选择变化时重置）
             if data.get("total") != self._total:
                 return None
-            if data.get("book_id") != self._book_id:
+            key_in_file = str(data.get("book_id") or data.get("bookId") or "")
+            # 接受两种键：新 content_key，以及旧布局的书架 id（尚未迁移的 progress.json）
+            if key_in_file and key_in_file not in (self._cache_key, self._book_id):
                 return None
-            if data.get("voice") != self._voice or data.get("rate") != self._rate:
+            if data.get("voice") != self._voice:
                 return None
+            rate_in_file = data.get("rate")
+            if rate_in_file is not None:
+                try:
+                    if isinstance(rate_in_file, (int, float)) and not isinstance(rate_in_file, bool):
+                        # 迁移前的整数标度（200 = 正常速）
+                        ok = int(rate_in_file) == self._rate
+                    else:
+                        ok = str(rate_in_file) == self._rate_dir
+                except Exception:
+                    ok = False
+                if not ok:
+                    return None
             completed = set(data.get("completed", []))
             done = data.get("done", len(completed))
             return done, completed
@@ -631,9 +662,12 @@ class WholeBookCacher:
                 total = self._total
                 cur_state = state or self._state
             data = {
-                "book_id": self._book_id,
+                # 一份文件同时写两种键名：PC 读 book_id，安卓读 bookId，值都是 content_key
+                "book_id": self._cache_key,
+                "bookId": self._cache_key,
                 "voice": self._voice,
-                "rate": self._rate,
+                # 语速存合成百分比字符串（如 "0" / "50" / "-50"），与目录名一致
+                "rate": self._rate_dir,
                 "total": total,
                 "done": done,
                 "completed": completed,
@@ -890,7 +924,7 @@ class WholeBookCacher:
                 self._bytes_written += len(audio)
             if self._bump_cb is not None:
                 try:
-                    self._bump_cb(self._book_id, self._voice, self._rate, len(audio))
+                    self._bump_cb(self._cache_key, self._voice, self._rate_dir, len(audio))
                 except Exception:
                     pass
         except Exception:
@@ -906,7 +940,7 @@ class WholeBookCacher:
         """
         if self._size_cb is not None:
             try:
-                return int(self._size_cb(self._book_id) or 0)
+                return int(self._size_cb(self._cache_key) or 0)
             except Exception:
                 pass
         total = 0
@@ -959,6 +993,12 @@ class SpeechController:
         self._edge_fail_posted = False
         self._volume = 100  # 音量权威值（0-100）；bus 播放时按它下发
         self._book_id = "book"  # 当前书 id（整本缓存/统计用；start 前必须已就位）
+        # 当前书的缓存目录键（content_key）；为空时回退 _book_id，兼容未接线的调用
+        self._cache_key = ""
+        # 书架 id → content_key 映射（按书统计/清理/大小索引共用，避免每次重算指纹）
+        self._bid_keys = {}
+        # 旧目录懒迁移锁（按书 rename，一次只动一本；不阻塞、不扫描全盘）
+        self._migrate_lock = threading.Lock()
         # 多人有声（句子级音色切换）：仅 Edge 后端生效
         self._multi_roles = None       # {角色名: voice_id}；None=未启用
         self._multi_dialogues = None   # 当前章对白区间表 {ci: [[start,end,role],...]}
@@ -1143,8 +1183,171 @@ class SpeechController:
             self._size_entries = None  # 目录切换后重新懒加载
             self._size_dirty = False
 
-    def set_book_id(self, book_id):
+    def set_book_id(self, book_id, cache_key=None):
+        """设置当前书：书架 id 只做 GUI 索引；传了 cache_key 才参与缓存路径。"""
         self._book_id = str(book_id or "book")
+        key = str(cache_key or "").strip()
+        self._cache_key = key or self._book_id
+        if key:
+            self._bid_keys[self._book_id] = key
+
+    def set_book_cache_keys(self, mapping):
+        """批量注册 书架id → content_key（启动时从书架元数据来，避免逐次重算指纹）。"""
+        try:
+            for bid, key in (mapping or {}).items():
+                if bid and key:
+                    self._bid_keys[str(bid)] = str(key)
+        except Exception:
+            pass
+
+    def cache_key_for(self, book_id=None):
+        """书架 id → 缓存目录键；未知则回退原 id（旧缓存目录仍可统计）。"""
+        bid = str(book_id or self._book_id or "book")
+        return self._bid_keys.get(bid, bid)
+
+    def _ensure_cache_key(self, bid, book=None):
+        """取（并按需计算）某本书的 content_key；算过就缓存，后续零成本。"""
+        key = self._bid_keys.get(bid)
+        if key:
+            # 映射可能来自启动注册：仍要保证旧目录已迁移（有标记文件时只多一次 exists）
+            self._lazy_migrate_book_dir(bid, key)
+            return key
+        if book is not None and getattr(book, "chapters", None):
+            try:
+                key = content_key_of_chapters(
+                    getattr(book, "title", "") or "",
+                    book.chapters,
+                )
+                self._bid_keys[bid] = key
+                self._lazy_migrate_book_dir(bid, key)
+                return key
+            except Exception:
+                pass
+        return bid
+
+    LAYOUT_MARK = ".tts_layout_v2"  # 每本书一份迁移标记：有它就不再动该目录
+
+    def _lazy_migrate_book_dir(self, bid, key):
+        """按书懒迁移旧缓存目录：只对本机已有的这一本做 rename，不扫描全盘、不复制文件。
+
+        <root>/<旧book_id>            → <root>/<content_key>
+        <root>/<key>/<语音>/<200…>    → <root>/<key>/<语音>/<语速百分比>
+        同卷目录 rename 与内部文件数无关（几万个 mp3 也是瞬时），
+        因此 PC 存量缓存不需要一次性全量迁移，打开哪本才迁哪本。
+        """
+        if not self._tts_cache_dir or not key or key == bid:
+            return
+        old = os.path.join(self._tts_cache_dir, str(bid))
+        new = os.path.join(self._tts_cache_dir, str(key))
+        mark = os.path.join(new, self.LAYOUT_MARK)
+        with self._migrate_lock:
+            if os.path.exists(mark):
+                return  # 该书已迁移过：幂等，绝不再动目录名
+            moved = False
+            try:
+                if os.path.isdir(old) and not os.path.exists(new):
+                    os.renames(old, new)
+                    moved = True
+            except Exception:
+                return
+            if not os.path.isdir(new):
+                return
+            # 语速目录：迁移前是 PC 整数标度（200），迁移后是合成百分比（0 / 50 / -50）
+            try:
+                for voice in os.listdir(new):
+                    vd = os.path.join(new, voice)
+                    if not os.path.isdir(vd) or voice.startswith("."):
+                        continue
+                    for rname in os.listdir(vd):
+                        rd = os.path.join(vd, rname)
+                        if not os.path.isdir(rd):
+                            continue
+                        old_rate = self._legacy_rate_of_dir(rd)
+                        if old_rate is None:
+                            continue  # 已是新命名（或无法判定）：保持原样
+                        target = rate_dir_key(old_rate)
+                        if target == rname:
+                            continue
+                        tgt_dir = os.path.join(vd, target)
+                        if os.path.exists(tgt_dir):
+                            continue  # 目标已存在：留给后台合并，避免误覆盖
+                        try:
+                            os.renames(rd, tgt_dir)
+                            self._rewrite_progress_rate(tgt_dir, key, target)
+                            moved = True
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                with open(mark, "w", encoding="utf-8") as f:
+                    json.dump({"v": 2, "at": time.time()}, f)
+            except Exception:
+                pass
+        # 目录改名后旧索引键全部失效：清掉本书条目并只重算这一本（纯 stat，很快），
+        # 其余书的索引条目原样保留，避免书架里其它书的大小显示成 0。
+        if moved:
+            try:
+                self.tts_cache_invalidate(bid)
+                # calibrate 按"目录名"扫盘，传 content_key（此时映射已登记）
+                self.tts_cache_calibrate(self.cache_key_for(bid))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _legacy_rate_of_dir(rd):
+        """判定某语速目录名是否属于迁移前的 PC 整数标度；是则返回旧整数。
+
+        依据：progress.json 的 rate 字段类型（旧文件是 int，新文件是 "-50" 这样的字符串）。
+        缺 progress.json 时只能用范围：pct 最大 100，故 >100 必为旧标度；
+        50..100 与 pct 重叠，保守按新命名处理，绝不破坏已迁移的缓存。
+        """
+        name = os.path.basename(rd)
+        try:
+            val = int(name)
+        except Exception:
+            return None
+        pp = os.path.join(rd, "progress.json")
+        if os.path.isfile(pp):
+            try:
+                with open(pp, "r", encoding="utf-8") as f:
+                    r = json.load(f).get("rate")
+                return val if isinstance(r, int) and not isinstance(r, bool) else None
+            except Exception:
+                return None
+        return val if val > 100 else None
+
+    @staticmethod
+    def _rewrite_progress_rate(dir_path, key, rate_dir):
+        """把迁移前 progress.json 的整数 rate 改写成目录名，供安卓端直接读取。"""
+        p = os.path.join(dir_path, "progress.json")
+        if not os.path.isfile(p):
+            return
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["book_id"] = key
+            data["bookId"] = key
+            data["rate"] = rate_dir
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, p)
+        except Exception:
+            pass
+
+    def ensure_book_cache(self, bid, book=None):
+        """把书对象算出的 content_key 落到当前会话，并顺带触发旧目录懒迁移。
+
+        open_book 时调用：meta 里已有 content_key 的书也要走这里，
+        否则升级前留下的 <root>/<旧book_id> 目录永远不会被改名。
+        """
+        key = self.cache_key_for(bid)
+        if book is not None:
+            key = self._ensure_cache_key(bid, book)
+        if str(bid) == self._book_id:
+            self._cache_key = key
+        return key
 
     def _cacher_for(self, book_id=None):
         """按 book_id 取缓存器；未指定时用当前书 id。"""
@@ -1162,9 +1365,9 @@ class SpeechController:
                 return None
             voice = self._external_voice if is_ext else (self._cur_voice or self._edge_voice)
             rate = int(self._rate)
-        bid = self._book_id or "book"
+        key = self._cache_key or self._book_id or "book"
         _vdir = hashlib.md5(voice.encode("utf-8")).hexdigest()[:16] if is_ext else _sanitize_name(voice)
-        d = os.path.join(self._tts_cache_dir, bid, _vdir, str(rate))
+        d = os.path.join(self._tts_cache_dir, key, _vdir, rate_dir_key(rate))
         p = os.path.join(d, f"{int(ci):04d}_{int(off):08d}.mp3")
         try:
             if os.path.exists(p) and os.path.getsize(p) > 0:
@@ -1211,6 +1414,7 @@ class SpeechController:
                 flush_cb=self._tts_size_persist,
                 workers=self._cache_workers,
                 is_external=is_external,
+                cache_key=self._ensure_cache_key(bid, book),
             )
             self._book_cachers[bid] = cacher
         cacher.start(resume=resume)
@@ -1239,7 +1443,8 @@ class SpeechController:
             voice = self._edge_voice
             rate = int(self._rate)
         try:
-            cacher = WholeBookCacher(book, book_id, self._tts_cache_dir, voice, rate, None)
+            cacher = WholeBookCacher(book, book_id, self._tts_cache_dir, voice, rate, None,
+                                    cache_key=self._ensure_cache_key(bid, book))
             cacher._build_ready.wait(timeout=60)
             prog = cacher._load_progress()
             if prog is None:
@@ -1262,7 +1467,8 @@ class SpeechController:
         with self._cv:
             voice = self._edge_voice
             rate = int(self._rate)
-        root = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
+        root = os.path.join(self._tts_cache_dir, self._ensure_cache_key(bid, book),
+                            _sanitize_name(voice), rate_dir_key(rate))
         # 与 WholeBookCacher._build_tasks 完全一致的任务构建（同一套切分/偏移规则）
         tasks = []
         for ci, ch in enumerate(book.chapters):
@@ -1320,6 +1526,7 @@ class SpeechController:
                 book, bid, self._tts_cache_dir, voice, rate,
                 bump_cb=self._tts_size_bump, size_cb=self.tts_cache_size,
                 flush_cb=self._tts_size_persist, preset_tasks=missing_tasks,
+                cache_key=self._ensure_cache_key(bid, book),
             )
             self._book_cachers[bid] = cacher
         cacher.start(resume=False)
@@ -1384,7 +1591,7 @@ class SpeechController:
         try:
             with self._size_lock:
                 entries = self._tts_size_load()
-                key = f"{str(bid)}/{voice}/{int(rate)}"
+                key = f"{str(bid)}/{voice}/{rate_dir_key(rate)}"
                 e = entries.get(key) or {"size": 0, "t": time.time()}
                 e["size"] = int(e.get("size", 0)) + int(delta)
                 e["t"] = time.time()
@@ -1406,7 +1613,7 @@ class SpeechController:
             with self._size_lock:
                 entries = self._tts_size_load()
                 if book_id is not None:
-                    key = str(book_id) + "/"
+                    key = self.cache_key_for(book_id) + "/"
                     total = sum(
                         int(e.get("size", 0))
                         for k, e in entries.items()
@@ -1443,7 +1650,7 @@ class SpeechController:
             with self._size_lock:
                 entries = self._tts_size_load()
                 if book_id is not None:
-                    key = str(book_id) + "/"
+                    key = self.cache_key_for(book_id) + "/"
                     for k in [k for k in list(entries) if k.startswith(key)]:
                         entries.pop(k, None)
                 else:
@@ -1494,7 +1701,7 @@ class SpeechController:
                 "bytes_written": int(st.get("bytes_written", 0)),
                 "history": False,
             }
-        root = os.path.join(self._tts_cache_dir or "", bid)
+        root = os.path.join(self._tts_cache_dir or "", self.cache_key_for(bid))
         best = None
         best_dir = None
         try:
@@ -1588,7 +1795,8 @@ class SpeechController:
             voice = self._edge_voice
             rate = int(self._rate)
         bid = str(book_id or "book")
-        d = os.path.join(self._tts_cache_dir, bid, _sanitize_name(voice), str(rate))
+        d = os.path.join(self._tts_cache_dir, self._ensure_cache_key(bid, book),
+                         _sanitize_name(voice), rate_dir_key(rate))
         result = {}
         for ci, ch in enumerate(book.chapters):
             try:

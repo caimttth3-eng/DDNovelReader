@@ -105,7 +105,17 @@ class ReaderMixin:
             return
         self.tts.stop()
         self.current_bid = bid
-        self.tts.set_book_id(bid)
+        # 缓存一级目录用 content_key（跨端稳定）；meta 里没有就按首章现算并回写
+        try:
+            ckey = meta.get("content_key") or ""
+            if not ckey:
+                from .content_key import content_key_of_book
+                ckey = content_key_of_book(self.storage, meta)
+                meta["content_key"] = ckey
+                self.storage.save()
+        except Exception:
+            ckey = ""
+        self.tts.set_book_id(bid, ckey)
         self.book = self._load_book(meta.get("path", ""))
         if self.book is None:
             # 打开失败：状态栏提示并进入空状态
@@ -117,10 +127,18 @@ class ReaderMixin:
             return
         # 老书迁移：原文件还在且无备份 → 自动复制备份
         self._ensure_source_backup(bid, meta)
+        # 旧缓存布局懒迁移（<root>/<旧book_id>/<语音>/<200> → <content_key>/<语音>/<pct>）
+        try:
+            self.tts.ensure_book_cache(bid, self.book)
+        except Exception:
+            pass
         prog = meta.get("progress") or {}
         self.chapter_idx = max(0, min(int(prog.get("chapter_idx", 0)), len(self.book.chapters) - 1))
         self.char_offset = int(prog.get("char_offset", 0))
         self.char_offset = max(0, min(self.char_offset, len(self.book.chapters[self.chapter_idx].content)))
+        # 记录本阅读器所持位置的版本时间：之后同步若拉来更新的进度，
+        # _save_now 会先采纳它，而不是用这里的旧位置把它盖回去
+        self._own_progress_at = float(meta.get("progress_at") or meta.get("last_read_at") or 0)
         self.root.title(f"{self.book.title} - " + _T("多多朗读 v{ver}").format(ver=__version__))
         self.title_label.configure(text=self.book.title)
         self._populate_chapters()
@@ -403,6 +421,18 @@ class ReaderMixin:
         self._save_timer = None
         if not self.current_bid or not self.book:
             return
+        # 同步守卫：若存储里的进度版本比"本阅读器手里的位置"更新（别的设备/同步写进来的），
+        # 说明本次保存的是过期位置——先采纳存储里的进度，绝不把它盖回去。
+        try:
+            stored = self.storage.get_book(self.current_bid) or {}
+            stored_at = float(stored.get("progress_at") or 0)
+            own_at = float(getattr(self, "_own_progress_at", 0) or 0)
+            if stored_at > own_at + 0.5:
+                self.adopt_remote_progress(self.current_bid, stored.get("progress") or {},
+                                           stored_at, quiet=True)
+                return
+        except Exception:
+            pass
         pct = self._compute_percent(self.chapter_idx, self.char_offset)
         # 位置 + 上次书 合并成一次落盘（原来分两次 = 两次全量 JSON 重写）
         self.storage.save_reading_state(
@@ -416,6 +446,46 @@ class ReaderMixin:
         )
         # 只更新书架里本书那一行，不再整表重建（重建会让主线程多花 50~60ms）
         self._update_shelf_progress(self.current_bid, pct)
+        try:
+            self._own_progress_at = float((self.storage.get_book(self.current_bid) or {}).get("progress_at") or 0)
+        except Exception:
+            pass
+        # 阅读统计：按位置前进量累加字数（手动阅读与朗读都走这里）
+        try:
+            self._stats_note_pos(self.current_bid, self.chapter_idx, self.char_offset)
+        except Exception:
+            pass
+    def adopt_remote_progress(self, bid, progress, progress_at=0.0, quiet=False):
+        """把同步/远端拉到的进度接到正在阅读的这本书上。
+
+        只移动阅读位置并重绘，不落盘（落盘会用自己的旧位置覆盖新进度）。
+        """
+        if not self.book or bid != self.current_bid:
+            return False
+        if not isinstance(progress, dict) or not progress:
+            return False
+        try:
+            ci = max(0, min(int(progress.get("chapter_idx", 0)), len(self.book.chapters) - 1))
+            off = int(progress.get("char_offset", 0) or 0)
+            off = max(0, min(off, len(self.book.chapters[ci].content)))
+        except Exception:
+            return False
+        self.chapter_idx = ci
+        self.char_offset = off
+        if not progress_at:
+            try:
+                progress_at = float((self.storage.get_book(bid) or {}).get("progress_at") or 0)
+            except Exception:
+                progress_at = 0.0
+        self._own_progress_at = float(progress_at or 0)
+        try:
+            self._render_chapter()
+        except Exception:
+            pass
+        if not quiet:
+            self._flash_status(_T("已同步到其他设备的阅读位置：第 {n} 章").format(n=ci + 1))
+        return True
+
     def _goto_chapter(self, ci, offset=0):
         if not self.book:
             return

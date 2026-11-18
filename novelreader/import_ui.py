@@ -448,8 +448,15 @@ class ImportMixin:
     def _save_import(self, content, path):
         """把解析结果写入书架与缓存，返回书籍 id。"""
         bid = self.storage.book_id(path)
+        # 与内容绑定的指纹：跨端/跨机器稳定，音频缓存一级目录与 WebDAV 同步共用此值
+        try:
+            from .content_key import content_key_of_chapters
+            ckey = content_key_of_chapters(content.title, content.chapters)
+        except Exception:
+            ckey = ""
         meta = {
             "id": bid,
+            "content_key": ckey,
             "title": content.title,
             "author": content.author,
             "format": content.format,

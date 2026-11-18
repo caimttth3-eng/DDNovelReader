@@ -77,13 +77,14 @@ def dir_size(path):
     return total
 
 
-def audio_cache_dirs(root, bid):
-    """返回某本书在 `root/<book_id>/<语音>/<语速>` 下的全部缓存目录列表。
+def audio_cache_dirs(root, cache_key):
+    """返回某本书在 `root/<content_key>/<语音>/<语速百分比>` 下的全部缓存目录列表。
 
-    每本书一个顶层目录，内部再按语音/语速分子目录（参数指纹隔离）。
+    一级目录是 content_key（跨端/跨机器稳定），内部再按语音/语速分子目录；
+    调用方传 shelf 的 book_id 时须先映射成 content_key（SpeechController.cache_key_for）。
     """
     out = []
-    bd = os.path.join(root, str(bid))
+    bd = os.path.join(root, str(cache_key))
     try:
         if not os.path.isdir(bd):
             return out
@@ -115,6 +116,16 @@ DEFAULT_SETTINGS = {
     "tts_cache_dir": "",       # 自定义整本语音缓存根目录（空=默认 %APPDATA%\\DDNovelReader\\tts_cache）
     "tts_cache_workers": 6,   # 整本缓存并发下载线程数（3~12，超过 6 易被微软限流）
     "skip_update_version": "", # 用户选择「跳过此版本」的版本号（更新提示不再提醒该版本）
+    # ---- WebDAV 数据同步（书架/进度/书签，不含正文与音频缓存）----
+    "sync_server": "",         # 服务器地址，如 https://dav.jianguoyun.com/dav/
+    "sync_user": "",           # WebDAV 账号
+    "sync_pass": "",           # WebDAV 密码（仅保存在本机 library.json）
+    "sync_dir": "DDNovelReader",  # 远端目录
+    "sync_device_id": "",      # 本机设备 ID（首次同步自动生成）
+    "sync_device_name": "",    # 设备显示名（默认取主机名）
+    "sync_auto": False,        # 启动时自动同步 + 每 10 分钟一次
+    "sync_verify_tls": True,   # 是否校验证书
+    "sync_last_time": 0,       # 上次成功同步时间
 }
 
 
@@ -139,6 +150,11 @@ class Storage:
                 self.data = {"books": {}, "settings": dict(DEFAULT_SETTINGS)}
         self.data.setdefault("books", {})
         self.data.setdefault("settings", {})
+        # 删除墓碑：{content_key: {"deleted_at": 秒, "title": 书名}}
+        # 本机删掉的书不再留条目，但必须留一条"删除事件"给同步，
+        # 否则对端只看到"本机没有这本书"，会把书又推回来（iCloud 同款墓碑逻辑）。
+        if not isinstance(self.data.get("deletions"), dict):
+            self.data["deletions"] = {}
         s = dict(DEFAULT_SETTINGS)
         s.update(self.data["settings"])
         self.data["settings"] = s
@@ -176,6 +192,10 @@ class Storage:
 
     def add_book(self, meta):
         self.data["books"][meta["id"]] = meta
+        # 重新导入同一本书 = 撤销它之前的删除墓碑，否则同步会把这本书再删掉一次
+        ck = str(meta.get("content_key") or "").strip()
+        if ck:
+            self.clear_deletion(ck, save=False)
         self.save()
         return meta["id"]
 
@@ -190,7 +210,12 @@ class Storage:
         if not b:
             return
         b["progress"] = progress
-        b["last_read_at"] = time.time()
+        now = time.time()
+        b["last_read_at"] = now
+        # 进度自己的时间戳：同步合并只认它，书架排序仍看 last_read_at。
+        # 分开的原因：仅仅"打开/切换书籍"也会刷新 last_read_at（touch），
+        # 若同步按 last_read_at 判断新者胜，PC 现实上没改进度却会压掉对端的新进度。
+        b["progress_at"] = now
         if save:
             self.save()
 
@@ -199,14 +224,53 @@ class Storage:
         b = self.data["books"].get(bid)
         if b:
             b["progress"] = progress
-            b["last_read_at"] = time.time()
+            now = time.time()
+            b["last_read_at"] = now
+            b["progress_at"] = now
         if last_book:
             self.data["settings"]["last_book"] = last_book
         self.save()
 
-    def remove_book(self, bid):
-        self.data["books"].pop(bid, None)
+    def remove_book(self, bid, deleted_at=None):
+        """从书架删除一本书，并留下删除墓碑（供 WebDAV 同步传给其它设备）。
+
+        deleted_at 不传时取当前时间；同步应用远端墓碑时要传远端时间，
+        否则本机时间会把对端的删除事件"变新"，导致反复拉锯。
+        """
+        b = self.data["books"].pop(bid, None)
+        if isinstance(b, dict):
+            ck = str(b.get("content_key") or "").strip()
+            if ck:
+                self.mark_deleted(ck, b.get("title") or "", deleted_at)
         self.save()
+
+    # ---------- 删除墓碑 ----------
+    def deletions(self):
+        return self.data.setdefault("deletions", {})
+
+    def mark_deleted(self, content_key, title="", deleted_at=None, save=True):
+        ck = str(content_key or "").strip()
+        if not ck:
+            return None
+        t = float(deleted_at) if deleted_at else time.time()
+        old = self.deletions().get(ck) or {}
+        try:
+            old_t = float(old.get("deleted_at") or 0)
+        except Exception:
+            old_t = 0.0
+        # 只保留最新一次删除事件
+        if t >= old_t:
+            self.deletions()[ck] = {"deleted_at": round(t, 3), "title": title or old.get("title") or ""}
+        if save:
+            self.save()
+        return ck
+
+    def clear_deletion(self, content_key, save=True):
+        ck = str(content_key or "").strip()
+        if ck and ck in self.deletions():
+            self.deletions().pop(ck, None)
+            if save:
+                self.save()
 
     def touch(self, bid):
         """更新最近阅读时间（不改变进度，避免频繁全量保存）。"""
@@ -391,7 +455,20 @@ def save_tts_size_index(root, entries):
 
 
 def tts_size_key(bid, voice, rate):
-    return f"{str(bid)}/{voice}/{int(rate)}"
+    """大小索引键，与缓存目录层级一一对应：`<content_key>/<语音>/<语速百分比>`。
+
+    rate 既可能是 PC 整数标度（200），也可能是目录名本身（"0"/"50"/"-50"），
+    两种入参都归一到同一目录名，避免索引与真实目录错位。
+    """
+    try:
+        if isinstance(rate, (int, float)) and not isinstance(rate, bool):
+            from .content_key import rate_dir_key
+            r = rate_dir_key(int(rate))
+        else:
+            r = str(rate)
+    except Exception:
+        r = str(rate)
+    return f"{str(bid)}/{voice}/{r}"
 
 
 def migrate_old_tts_layout(root):
@@ -465,7 +542,13 @@ def calibrate_tts_size(root, bid=None):
     try:
         with _tts_size_lock:
             entries = load_tts_size_index(root)
-            entries.clear()
+            # 只校准指定书时不能清空整个索引：其它书的条目必须原样保留
+            if bid is not None:
+                prefix = str(bid) + "/"
+                for k in [k for k in list(entries) if k.startswith(prefix)]:
+                    entries.pop(k, None)
+            else:
+                entries.clear()
             result = {}
             if bid is not None:
                 bids = [str(bid)]

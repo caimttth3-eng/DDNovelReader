@@ -1,0 +1,36 @@
+# 多多朗读（DDNovelReader）· 工作区硬规则
+
+> 本文件每个会话都会被自动加载。下面的规则与 `开发环境指南.md` 配套，冲突时以该指南为准。
+
+## 0. 铁律（不可协商）
+
+1. **任何任务的第一步：先读 `开发环境指南.md`。** 第 1、2、3、4 节必读（环境时间线 / 当前快照 / 已踩的坑 / 验证脚本）；涉及打包或发布，再读完第 5、5b 节。里面的坑都是真实事故换来的，禁止凭记忆或"上次能用"开工。
+2. **踩到的任何问题，一律写回 `开发环境指南.md`。** 按既有格式新增「### 坑 N（日期 新增）：一句话症状」，固定四段：**症状 → 原因 → 修复（已执行内容）→ 防再犯**，并附本轮验证入口（脚本名 / 命令 / 实测数字）。只写在对话里等于没记录。
+3. **结论必须可复现。** 判断"改好了没有"用脚本输出、A/B 实测数字、窗口核对与截图，不用"看起来正常"。
+
+## 1. 改代码时的硬约束
+
+- **更新说明四处载体一次改齐**：`novelreader/version_info.py` 的 `VERSION_HISTORY` 最新条目、`README.md` 版本历史、GitHub Release 说明、`ROADMAP.md`。改完必须跑 `.venv\Scripts\python.exe _check_notes_sync.py`，**PASS 才允许打包/发布**。
+- **更新说明写给普通用户看**：不出现 `content_key`、PROPFIND、schema、书签 id 这类内部术语，讲"用户得到什么"；且不得出现具体书名 / 章节名 / 疑似书名格式。
+- **五语言**：新增任何界面文案必须走 `_T()` 并补齐 简中 / 繁中 / 英 / 日 / 韩（繁体另补 `_ZH_TW`），漏一个语言就是欠账。
+- **三平台**：新增平台相关 API（打开文件夹、托盘、媒体键、路径）必须有 Windows / macOS / Linux 分支；路径只用 `os.path` / `pathlib`，不写死分隔符。
+- **发布**：严格按 `开发环境指南.md` 第 5b 节 13 步执行，不省步、不乱序；第 1 步先向用户确认三段式版本号（x.y.z）后才动代码。
+- **Tk 线程与性能红线**（坑 16）：主线程不 `join()` / `sleep()` 等后台线程；子线程只 `queue.put`，绝不直接碰 Tk；一次交互只写一次 `library.json`；启动路径上的重模块惰性导入。
+
+## 2. 本机环境（沙箱）注意
+
+- 每个会话先 `.venv\Scripts\python.exe -V`，与指南第 1 节时间线比对；版本对不上按坑 7 / 坑 9 整体整修，禁止在 ABI 不匹配状态下打包。
+- 沙箱禁写 `%TEMP%` 与 `%APPDATA%`（坑 21）；`tempfile.mkdtemp` 建的目录写不进也删不掉（坑 23）。跑测试把 `TEMP` / `TMP` 指到项目内普通目录并替换 `mkdtemp`；GUI 验证必须注入 `DOUBAO_NOVEL_DATA`。
+- pwsh 输出中文会乱码或被吞（坑 6、坑 12）：读中文文件一律用 read 工具；后台执行含中文路径的 `.ps1` 必须 UTF-8 BOM。
+
+## 3. 工程地图
+
+- 入口：`novelreader/main.py`；核心：`gui.py`（组装各 Mixin）、`reader_ui.py`（阅读区 / 朗读控制）、`tts_engine.py`（合成与播放）、`storage.py`（library.json）、`book_loader.py`（解析与分章）、`sync_engine.py` + `sync_ui.py`（WebDAV 同步）、`stats.py` + `stats_ui.py`（阅读统计）、`i18n.py`（五语言词典）。
+- 测试：`tests/` 下 `test_sync_engine_v2.py`、`test_cache_layout*.py`、`test_gui_cache_wiring.py`、`e2e_cross.py`（配 `mock_dav.py`）。
+- 安卓端是独立工程：`C:\Users\lyuga\Doubao\chats\2026-09-01\new-chat\duoduo_langdu`（Flutter，单独发布），跨端契约见 `安卓互通指南.md`。
+- 文档：`开发环境指南.md`（环境与坑，权威）、`ROADMAP.md`（版本规划与待办）、`安卓端同步开发指南.md`、`PC端缓存共用改造指南.md`。
+
+## 4. 卫生与安全
+
+- 项目根只留正式工程文件、spec 与文档；临时诊断脚本用完即删（长期保留的仅 `_check_notes_sync.py`、`_clean_mei.py`，并注明用途）。
+- 大产物走 GitHub Release，不进 git；`_gh_token.txt` 与任何凭据绝不入库、不写进文档。

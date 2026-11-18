@@ -82,6 +82,15 @@ class NovelReaderBase:
         self.tts = SpeechController()
         self.tts.set_tts_cache_dir(self._effective_tts_cache_root())
         self.tts.set_cache_workers(self.storage.get_setting("tts_cache_workers", 6))
+        # 已算过指纹的书直接注册，避免每次按书统计/清理时重算首章
+        try:
+            self.tts.set_book_cache_keys({
+                m.get("id"): m.get("content_key")
+                for m in self.storage.all_books().values()
+                if m.get("id") and m.get("content_key")
+            })
+        except Exception:
+            pass
 
         self.current_bid = None
         self.book = None          # BookContent
@@ -121,6 +130,10 @@ class NovelReaderBase:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # 蓝牙耳机 / 键盘多媒体键（播放/暂停、停止）→ 朗读控制（仅 Windows）
         self._install_media_keys()
+        # WebDAV 数据同步：开了自动同步时，窗口稳定后台跑一次并挂定时器
+        self.root.after(2500, self._sync_auto_start)
+        # 阅读统计：朗读时长 / 软件开启时长心跳（字数在保存阅读位置时累加）
+        self._stats_init()
 
         # 先让窗口显示：阅读区放加载占位并立即布局。若在窗口未映射时调用
         # Text.see() 会触发全量布局重算（实测可达 9-11 秒），造成启动白屏卡顿；
@@ -1111,6 +1124,18 @@ class NovelReaderBase:
                 self._shelf_poll_id = None
         except Exception:
             pass
+        # 停掉 WebDAV 自动同步定时器
+        try:
+            if getattr(self, "_sync_timer_id", None):
+                self.root.after_cancel(self._sync_timer_id)
+                self._sync_timer_id = None
+        except Exception:
+            pass
+        # 阅读统计收尾：停心跳、补尾段、落盘
+        try:
+            self._stats_close()
+        except Exception:
+            pass
         self.root.destroy()
 
 # ============ Mixin 组装 ============
@@ -1127,6 +1152,8 @@ from .bookmark_ui import BookmarkMixin
 from .search_ui import SearchMixin
 from .media_keys import MediaKeysMixin
 from .engine_ui import EngineMixin
+from .sync_ui import SyncMixin
+from .stats_ui import StatsMixin
 from .i18n import T as _T
 
 
@@ -1145,6 +1172,8 @@ class NovelReaderApp(
     SearchMixin,
     MediaKeysMixin,
     EngineMixin,
+    SyncMixin,
+    StatsMixin,
 ):
     """多多朗读主应用（由基类 + 各功能 Mixin 组装，行为与原单文件一致）。"""
     pass

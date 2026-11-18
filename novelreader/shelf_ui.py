@@ -364,7 +364,7 @@ class ShelfMixin:
         try:
             root = self._effective_tts_cache_root()
             import shutil
-            for d in audio_cache_dirs(root, bid):
+            for d in audio_cache_dirs(root, self.tts.cache_key_for(bid)):
                 try:
                     shutil.rmtree(d, ignore_errors=True)
                 except Exception:
