@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """弹窗：关于 / 皮肤选择 / 邮箱复制 / 定时停止 / 百分比跳转（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -83,7 +83,7 @@ class DialogMixin:
         entries = [
             ("cache", _T("缓存管理"), _T("正文/音频"), self._show_cache_manager_dialog),
             ("engine", _T("语音引擎"), _T("外部TTS"), self._show_engines_dialog),
-            ("sync", _T("数据同步"), _T("WebDAV"), self._show_sync_dialog),
+            ("sync", _T("数据同步"), _T("云端/局域网"), self._show_sync_dialog),
             ("stats", _T("阅读统计"), _T("时长/字数"), self._show_stats_dialog),
             ("keyboard", _T("快捷键说明"), _T("Ctrl/±"), self._show_shortcuts_dialog),
             ("changelog", _T("更新记录"), _T("版本历史"), self._show_changelog_dialog),

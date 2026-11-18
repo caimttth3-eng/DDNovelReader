@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """主界面基类：启动加载 + UI 构建 + 公共工具（从 gui.py 拆分的 Mixin 之一）。"""
 import ctypes
 import os
@@ -132,6 +132,12 @@ class NovelReaderBase:
         self._install_media_keys()
         # WebDAV 数据同步：开了自动同步时，窗口稳定后台跑一次并挂定时器
         self.root.after(2500, self._sync_auto_start)
+        # 局域网本地同步（v2.2.9）：开了就随软件启动内嵌服务，关闭软件即停止
+        try:
+            self._lan_defaults()      # 首次启动即生成配对码，配对信息随时可看
+        except Exception:
+            pass
+        self.root.after(2600, self._lan_auto_start)
         # 阅读统计：朗读时长 / 软件开启时长心跳（字数在保存阅读位置时累加）
         self._stats_init()
 
@@ -665,7 +671,10 @@ class NovelReaderBase:
         ttk.Button(back_row, text=_T("备份书架"), command=self._backup_library).pack(
             side="left", fill="x", expand=True, pady=2, padx=(0, 2))
         ttk.Button(back_row, text=_T("还原书架"), command=self._restore_library).pack(
-            side="left", fill="x", expand=True, pady=2, padx=(2, 0))
+            side="left", fill="x", expand=True, pady=2, padx=(2, 2))
+        # 一键同步（v2.2.9）：局域网优先、其次云端；两者共用串行队列，结果落状态栏
+        self.btn_shelf_sync = ttk.Button(back_row, text=_T("一键同步"), command=self._sync_shelf_now)
+        self.btn_shelf_sync.pack(side="left", fill="x", expand=True, pady=2, padx=(2, 0))
         self._shelf_visible = False
 
         read_frame = tk.Frame(self._inner_paned)
@@ -1134,6 +1143,17 @@ class NovelReaderBase:
         # 阅读统计收尾：停心跳、补尾段、落盘
         try:
             self._stats_close()
+        except Exception:
+            pass
+        # 局域网同步服务收尾：关软件即关服务器（释放端口与线程），并停掉脏标记看门狗
+        try:
+            if getattr(self, "_lan_watch_id", None):
+                self.root.after_cancel(self._lan_watch_id)
+                self._lan_watch_id = None
+        except Exception:
+            pass
+        try:
+            self._lan_stop()
         except Exception:
             pass
         self.root.destroy()
