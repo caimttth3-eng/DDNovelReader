@@ -13,7 +13,8 @@ Write-Output "== build onefile =="
 & ".venv\Scripts\python.exe" -m PyInstaller --clean -y "多多朗读_onefile.spec"
 if ($LASTEXITCODE -ne 0) { Write-Output "ONEFILE FAIL"; exit 1 }
 Write-Output "== zip onedir =="
-Compress-Archive -Path "dist\多多朗读\*" -DestinationPath "多多朗读_v2.2.3_Windows_onedir.zip" -Force
+Compress-Archive -Path "dist\多多朗读\*" -DestinationPath "多多朗读_v2.2.8_Windows_onedir.zip" -Force
 Write-Output "== artifacts =="
 Get-ChildItem -LiteralPath "dist" | ForEach-Object { Write-Output ("dist/" + $_.Name) }
+Get-Item -LiteralPath "多多朗读_v2.2.8_Windows_onedir.zip" | ForEach-Object { Write-Output ("root/" + $_.Name + " " + $_.Length) }
 Write-Output "PACK DONE"
