@@ -411,7 +411,7 @@ class ImportMixin:
 
         def worker():
             try:
-                content = book_loader.parse_book(path)  # 强制重新解析
+                content = book_loader.parse_book(path, art_dir=self._art_root())  # 强制重新解析
                 diag = None
                 # 仅纯文本格式可做分章诊断（epub/pdf/chm 章节来自文件结构，不适用）
                 if content.format in ("txt",):

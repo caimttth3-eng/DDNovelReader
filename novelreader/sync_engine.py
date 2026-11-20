@@ -523,6 +523,7 @@ class SyncEngine:
         """
         from .book_loader import parse_book
         from .content_key import content_key_of_chapters
+        from .storage import art_dir
 
         title = rec.get("title") or key
         src_meta = rec.get("source") if isinstance(rec.get("source"), dict) else {}
@@ -571,7 +572,9 @@ class SyncEngine:
             return None
 
         try:
-            content = parse_book(dst)
+            # 插图只落在本机缓存（<缓存根>/art/），不随同步传输；
+            # 远端拉来的书在本地解压生成，换设备后同样由本机重建
+            content = parse_book(dst, art_dir=art_dir(self.storage.get_setting("cache_dir") or ""))
             # 书名以远端记录为准：本地文件名是指纹，不能参与标题推导
             if rec.get("title"):
                 content.title = str(rec.get("title"))

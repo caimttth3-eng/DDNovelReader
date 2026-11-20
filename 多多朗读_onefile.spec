@@ -102,6 +102,8 @@ _hiddenimports = [
     # v2.2.7 起 docx/mobi/edge_tts/pycaw 改为函数内惰性导入（缩短启动导入链），
     # 这里显式收集 mobi 作双保险，避免打包漏收导致 mobi/azw3 解析失效
     'mobi',
+    # epub 插图渲染（v2.3.0）：PIL 在渲染函数内惰性导入，显式收集防漏
+    'PIL', 'PIL.Image', 'PIL.ImageTk',
 ]
 
 # --- excludes：排除用不到的标准库/测试模块 ---

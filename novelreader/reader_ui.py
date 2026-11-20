@@ -16,6 +16,7 @@ from . import __version__, book_loader
 from .storage import (
     Storage,
     cache_dir,
+    art_dir,
     tts_cache_dir,
     resolve_tts_cache_dir,
     resolve_cache_dir,
@@ -38,11 +39,31 @@ from .constants import (
 
 class ReaderMixin:
     """阅读区：书籍加载 / 章节渲染 / 进度 / 滚动 / 高亮跟随 / 分页 / 定时保存"""
+    def _art_root(self):
+        """本机插图缓存目录（随正文解析缓存一起转移/清除，不参与跨设备同步）。"""
+        try:
+            return art_dir(self.storage.get_setting("cache_dir") or "")
+        except Exception:
+            return ""
+    def _art_missing(self, content):
+        """缓存里引用的插图文件在本机是否缺失（换设备/清缓存/换目录后需要重建）。"""
+        try:
+            names = content.art_names() if hasattr(content, "art_names") else []
+        except Exception:
+            return False
+        if not names:
+            return False
+        root = self._art_root()
+        for n in names[:80]:
+            if not os.path.exists(os.path.join(root, n)):
+                return True
+        return False
     def _load_book(self, path, force_reparse=False):
         """加载书籍：内存缓存 → 磁盘缓存(版本匹配) → 源文件(原路径/备份源) → 旧缓存(静默兜底)。
 
         源文件/备份缺失时直接继续用缓存阅读，不打断用户；
         依赖源文件的功能（如书架“复制原文件”）在各自入口提示。
+        插图不进同步：缓存引用的插图文件缺失时，自动用本机源文件重新解压生成。
         """
         bid = self.storage.book_id(path)
         if not force_reparse:
@@ -54,13 +75,15 @@ class ReaderMixin:
                 # 版本不符时优先重新解析；解析失败才回退旧缓存
                 if int(cached.get("v", 0)) == book_loader.CONTENT_CACHE_VERSION:
                     content = book_loader.BookContent.from_dict(cached)
-                    self._cache[bid] = content
-                    return content
+                    if not self._art_missing(content):
+                        self._cache[bid] = content
+                        return content
+                    # 插图缺失 → 继续走源文件重解析（下面解析失败会回退旧缓存）
         # 源文件：原路径不存在时回退到缓存目录里的备份源
         src = self._resolve_source_path(bid, path)
         if src:
             try:
-                content = book_loader.parse_book(src)
+                content = book_loader.parse_book(src, art_dir=self._art_root())
                 self.storage.write_cache(bid, content)
                 self._cache[bid] = content
                 return content
@@ -181,11 +204,13 @@ class ReaderMixin:
         self.text.insert("1.0", title_text + "\n\n", "chapter_title")
         # 记录标题偏移量（标题+两个换行）
         self._title_char_len = len(title_text) + 2
-        # 正文起始行号：注意 Tk 的 index("end") 在文本以 \n\n 结尾时会多返回 1 行
-        # （隐含末尾空行），而正文实际插入后落在 end-1c 所在行，故用 end-1c。
-        self._body_start_line = int(self.text.index("end-1c").split(".")[0])
-        # 插入正文
-        self.text.insert("end", self._apply_paragraph_mode(ch.content), "body")
+        # 正文起始行：标题一行 + 一个空行，正文固定从第 3 行开始
+        # （标题已 strip 过，不含换行；Tk 的 end/end-1c 在文末换行上会多算一行，不可用）
+        self._body_start_line = 3
+        # 插入正文（含插图：按 anchor 分段插入，全程只往 end 追加，避免索引漂移）
+        disp = self._apply_paragraph_mode(ch.content)
+        self._disp_text = disp
+        self._insert_body_with_art(ch, disp)
         self.text.configure(state="disabled")
         self._apply_font()
         self._tag_body()
@@ -196,6 +221,222 @@ class ReaderMixin:
         self._repin_reading()
         # 渲染本书书签高亮（划线标注）
         self._apply_bookmark_tags()
+    def _insert_body_with_art(self, ch, disp):
+        """把显示文本按插图锚点分段插入，插图独占一行。
+
+        同时建立 `_line_map`：[(行号, 该行起始显示偏移, 该行起始原文偏移, 是否插图行)]，
+        滚动位置/朗读高亮只按这张表换算（Tk 对嵌入图片的字符计数不可靠）。
+        """
+        self._line_map = []
+        self._art_pics = []
+        self._art_src = {}
+        self._ensure_art_click()
+        arts = sorted(getattr(ch, "art", None) or (), key=lambda x: x[0])
+        content = ch.content
+        line = self._body_start_line
+        col = 0
+        pos = 0
+
+        def add_text(seg, start):
+            nonlocal line, col
+            if not seg:
+                return
+            parts = seg.split("\n")
+            base = start
+            for i, part in enumerate(parts):
+                self._line_map.append(
+                    (line + i, base, self._disp_to_content_index(base, content), False)
+                )
+                base += len(part) + 1
+            if len(parts) > 1:
+                line += len(parts) - 1
+                col = len(parts[-1])
+            else:
+                col += len(parts[0])
+
+        for anchor, name in arts:
+            d = self._content_to_disp_index(anchor, content, disp)
+            d = max(pos, min(d, len(disp)))
+            seg = disp[pos:d]
+            if seg:
+                self.text.insert("end", seg, "body")
+                add_text(seg, pos)
+            if col > 0:
+                self.text.insert("end", "\n", "body")
+                line += 1
+                col = 0
+            if self._insert_art_image(name):
+                # 插图单独占一行；位置换算时该行直接对应它的原文锚点
+                self._line_map.append((line, pos, anchor, True))
+                line += 1
+                col = 0
+            pos = d
+        rest = disp[pos:]
+        if rest:
+            self.text.insert("end", rest, "body")
+            add_text(rest, pos)
+    def _insert_art_image(self, name):
+        """在文本 end 处插入一张插图（独占一行）；文件缺失/解码失败静默跳过。"""
+        if not name:
+            return False
+        path = os.path.join(self._art_root(), name)
+        if not os.path.exists(path):
+            return False
+        try:
+            from PIL import Image, ImageTk
+        except Exception:
+            return False
+        try:
+            im = Image.open(path)
+            im.load()
+            # 带透明通道的图（P+transparency / RGBA / LA / 1bit）统一转 RGBA，
+            # 否则 convert("RGB") 会把透明区填成黑块（网文 epub 的插图多数是这类存图）
+            if im.mode in ("P", "PA"):
+                im = im.convert("RGBA")
+            elif im.mode in ("LA", "1"):
+                im = im.convert("RGBA")
+            w, h = im.size
+            if not w or not h:
+                return False
+            avail = self.text.winfo_width()
+            if avail < 200:
+                avail = 640
+            max_w = max(120, avail - 24)
+            max_h = max(240, int(max(self.text.winfo_height(), 320) * 1.15))
+            scale = min(1.0, max_w / float(w), max_h / float(h))
+            if scale < 1.0:
+                im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+            if im.mode == "RGBA":
+                # Tk 的文本控件不做 alpha 合成，直接把图铺到正文底色上
+                im = self._flatten_on_bg(im)
+            elif im.mode != "RGB":
+                im = im.convert("RGB")
+            ph = ImageTk.PhotoImage(im, master=self.root)
+        except Exception:
+            return False
+        self.text.image_create("end", image=ph, padx=6, pady=6)
+        self.text.insert("end", "\n", "body")
+        self._art_pics.append(ph)
+        try:
+            self._art_src[str(ph)] = path
+        except Exception:
+            pass
+        return True
+    def _ensure_art_click(self):
+        """只绑一次：点击正文里的插图 -> 弹出预览（可滚轮缩放）。"""
+        if getattr(self, "_art_click_bound", False):
+            return
+        try:
+            self.text.bind("<Button-1>", self._on_art_click, add="+")
+            self._art_click_bound = True
+        except Exception:
+            pass
+    def _on_art_click(self, event):
+        try:
+            idx = self.text.index("@%d,%d" % (event.x, event.y))
+        except Exception:
+            return
+        try:
+            names = self.text.image_names()
+        except Exception:
+            return
+        src = getattr(self, "_art_src", None) or {}
+        for name in names:
+            try:
+                if self.text.index(name) != idx:
+                    continue
+                img = str(self.text.image_cget(name, "image"))
+                path = src.get(img)
+                if path and os.path.exists(path):
+                    self._open_art_preview(path)
+                return
+            except Exception:
+                continue
+    def _open_art_preview(self, path):
+        """插图预览窗：默认按屏幕大小适配，滚轮缩放，Esc/单击关闭，双击复位。"""
+        import tkinter as tk
+        from PIL import Image, ImageTk
+        try:
+            im = Image.open(path)
+            im.load()
+        except Exception:
+            return
+        if im.mode in ("P", "PA", "LA", "1"):
+            im = im.convert("RGBA")
+        elif im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGB")
+        if im.mode == "RGBA":
+            flat = Image.new("RGB", im.size, (24, 24, 24))
+            flat.paste(im, (0, 0), im)
+            im = flat
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        max_w, max_h = int(sw * 0.92), int(sh * 0.88)
+        fit = min(1.0, max_w / float(im.size[0]), max_h / float(im.size[1]))
+        win_w = max(320, int(im.size[0] * fit))
+        win_h = max(240, int(im.size[1] * fit))
+        try:
+            top = tk.Toplevel(self.root)
+        except Exception:
+            return
+        top.title(_T("插图预览"))
+        top.configure(bg="#181818")
+        top.geometry("%dx%d+%d+%d" % (win_w, win_h, max(0, (sw - win_w) // 2), max(0, (sh - win_h) // 2)))
+        try:
+            top.transient(self.root)
+        except Exception:
+            pass
+        cv = tk.Canvas(top, bg="#181818", highlightthickness=0, width=win_w, height=win_h, cursor="hand2")
+        cv.pack(fill="both", expand=True)
+        state = {"zoom": 1.0}
+
+        def render():
+            z = state["zoom"]
+            w = max(1, int(im.size[0] * fit * z))
+            h = max(1, int(im.size[1] * fit * z))
+            pic = im.resize((w, h), Image.LANCZOS) if (w, h) != im.size else im
+            try:
+                ph = ImageTk.PhotoImage(pic, master=top)
+            except Exception:
+                return
+            state["ph"] = ph
+            cw = cv.winfo_width() or win_w
+            chh = cv.winfo_height() or win_h
+            cv.delete("all")
+            cv.create_image(cw // 2, chh // 2, image=ph, anchor="center")
+
+        def on_wheel(e):
+            step = 1.12 if getattr(e, "delta", 0) > 0 else 1 / 1.12
+            state["zoom"] = max(0.2, min(4.0, state["zoom"] * step))
+            render()
+
+        def on_close(_=None):
+            try:
+                top.destroy()
+            except Exception:
+                pass
+        top.bind("<MouseWheel>", on_wheel)
+        cv.bind("<MouseWheel>", on_wheel)
+        top.bind("<Escape>", on_close)
+        cv.bind("<Button-1>", on_close)
+        cv.bind("<Double-Button-1>", lambda e: (state.__setitem__("zoom", 1.0), render()))
+        try:
+            top.bind("<Configure>", lambda e: render() if state.get("ph") else None)
+        except Exception:
+            pass
+        top.after(20, render)
+    def _flatten_on_bg(self, im):
+        """把 RGBA 插图铺到正文底色上，返回 RGB 图（Tk 文本控件不做 alpha 合成）。"""
+        from PIL import Image
+        bg = (255, 255, 255)
+        try:
+            color = self.text.cget("background") or "#ffffff"
+            r, g, b = self.text.winfo_rgb(color)
+            bg = (r // 256, g // 256, b // 256)
+        except Exception:
+            pass
+        canvas = Image.new("RGB", im.size, bg)
+        canvas.paste(im, (0, 0), im)
+        return canvas
     def _reprocess_current_book(self):
         """右键菜单：按最新分章器重新解析整本（后台线程+进度窗）。"""
         if not self.current_bid or not self.book:
@@ -210,6 +451,10 @@ class ReaderMixin:
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.configure(state="disabled")
+        self._disp_text = ""
+        self._line_map = []
+        self._art_pics = []
+        self._art_src = {}
         self.title_label.configure(text=_T("未打开书籍"))
         self.percent_label.configure(text="0.0%")
         self.pos_label.configure(text="")
@@ -299,23 +544,104 @@ class ReaderMixin:
         except Exception:
             pass
     def _current_offset(self):
+        """视口顶部对应的原文字符偏移（按渲染时建立的行映射反算，不依赖 Tk 字符计数）。"""
         try:
-            top = self.text.index("@0,0")
-            cnt = self.text.count("1.0", top, "chars")
-            raw = cnt[0] if cnt else 0
-            # 减去章节标题的字符数，得到正文中的偏移
-            return max(0, raw - self._title_char_len)
+            line = int(self.text.index("@0,0").split(".")[0])
+            col = int(self.text.index("@0,0").split(".")[1])
         except Exception:
             return 0
+        lmap = getattr(self, "_line_map", None)
+        if not lmap:
+            return max(0, getattr(self, "char_offset", 0))
+        ch = self.book.chapters[self.chapter_idx]
+        # 行映射按行号升序，取最后一条 line <= 当前行的记录
+        best = None
+        for ent in lmap:
+            if ent[0] <= line:
+                best = ent
+            else:
+                break
+        if best is None:
+            return 0
+        if best[3]:
+            # 插图行：位置即该插图的原文锚点
+            return max(0, min(len(ch.content), best[2]))
+        return max(0, min(len(ch.content), best[2] + col))
+    def _content_to_disp_index(self, off, content, disp=None):
+        """原文偏移 → 显示文本偏移（按空行模式换算，不含插图占位）。"""
+        if disp is None:
+            disp = getattr(self, "_disp_text", "")
+        off = max(0, min(int(off), len(content)))
+        mode = int(self.settings.get("paragraph_mode", 1))
+        if mode == 2:
+            return min(len(disp), off + content[:off].count("\n"))
+        if mode == 3:
+            return max(0, off - content[:off].count("\n"))
+        return off
+    def _disp_to_content_index(self, d, content):
+        """显示文本偏移 → 原文偏移（_content_to_disp_index 的反算）。"""
+        d = max(0, int(d))
+        mode = int(self.settings.get("paragraph_mode", 1))
+        disp = getattr(self, "_disp_text", "")
+        if mode == 2:
+            extra = disp[:d].count("\n\n")
+            return max(0, min(len(content), d - extra))
+        if mode == 3:
+            count = 0
+            for i, ch in enumerate(content):
+                if ch == "\n":
+                    continue
+                if count >= d:
+                    return i
+                count += 1
+            return len(content)
+        return max(0, min(len(content), d))
+    def _transformed_pos(self, content, off):
+        """原文偏移 → 渲染文本中的 (逻辑行, 列)，行映射由渲染时逐段建立。"""
+        d = self._content_to_disp_index(off, content)
+        lmap = getattr(self, "_line_map", None)
+        if lmap:
+            best = lmap[0]
+            for ent in lmap:
+                if ent[3]:
+                    continue  # 插图行不参与文本位置匹配
+                if ent[1] <= d:
+                    best = ent
+                else:
+                    break
+            line, start = best[0], best[1]
+            return line, max(0, d - start)
+        # 兜底：无行映射（未渲染过）时按原逻辑估算
+        before = content[:off]
+        nl_before = before.count("\n")
+        mode = int(self.settings.get("paragraph_mode", 1))
+        if mode == 3:
+            return self._body_start_line, off - nl_before
+        line = nl_before + 1
+        last_nl = before.rfind("\n")
+        col = off - (last_nl + 1) if last_nl >= 0 else off
+        if mode == 2:
+            line = line * 2 - 1
+        return line + self._body_start_line - 1, col
     def _display_line_to_offset(self, line):
-        """把渲染文本的显示行号映射回原文字符偏移（该段落起点的原文偏移）。
+        """把渲染文本的显示行号映射回原文字符偏移（该行起点对应的原文偏移）。
 
-        空行模式会改变显示行号：模式1 原始第 L 行→显示第 L 行；
-        模式2 原始第 L 行→显示第 2L-1 行（偶数为空行）；模式3 全文仅 1 行。
+        优先用渲染时建立的行映射（含插图行），无映射时才回退到按空行模式推算。
         """
         content = self.book.chapters[self.chapter_idx].content
-        mode = int(self.settings.get("paragraph_mode", 1))
         line = max(1, int(line))
+        lmap = getattr(self, "_line_map", None)
+        if lmap:
+            best = None
+            for ent in lmap:
+                if ent[0] <= line:
+                    best = ent
+                else:
+                    break
+            if best is None:
+                return 0
+            return max(0, min(len(content), best[2]))
+        mode = int(self.settings.get("paragraph_mode", 1))
         # 减去章节标题占的行数，得到正文中的行号
         line = max(1, line - self._body_start_line + 1)
         if mode == 3:
@@ -600,26 +926,6 @@ class ReaderMixin:
             # 非阻塞提示。注意：Edge 联网失败会回退本地语音并继续朗读，
             # 此时不能把按钮重置为“开始朗读”，真正的结束由 “stopped” 事件统一处理。
             self._flash_status(evt.get("message", _T("朗读出错")))
-    def _transformed_pos(self, content, off):
-        """把原始正文的字符偏移映射到渲染文本（压缩空行后）中的 (行, 列)。
-
-        空行模式会改变换行数量，导致按原文计算的 行/列 在渲染文本中错位；
-        朗读高亮、滚动定位都必须经过此映射才能落在正确位置。
-        """
-        before = content[:off]
-        nl_before = before.count("\n")
-        mode = int(self.settings.get("paragraph_mode", 1))
-        if mode == 3:
-            # 清理所有行：所有换行被删除，正文只有第 1 行；加上标题占的行数
-            return self._body_start_line, off - nl_before
-        line = nl_before + 1
-        last_nl = before.rfind("\n")
-        col = off - (last_nl + 1) if last_nl >= 0 else off
-        if mode == 2:
-            # 合并为一行：每个段落间多一个空行，原始第 L 段 → 渲染第 2L-1 行
-            line = line * 2 - 1
-        # 加上章节标题占的行数，得到显示文本中的行号
-        return line + self._body_start_line - 1, col
     def _highlight_sentence(self, ci, off, text):
         content = self.book.chapters[ci].content
         line, col = self._transformed_pos(content, off)

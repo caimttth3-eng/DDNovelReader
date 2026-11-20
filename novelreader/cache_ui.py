@@ -98,6 +98,7 @@ class CacheMixin:
     def _clear_cache(self, size_lbl=None):
         if not messagebox.askyesno(_T("清除缓存"), _T("确定清除全部正文解析缓存？\n（下次打开书籍需重新解析，不影响书籍原文件）")):
             return
+        import shutil
         d = self._effective_text_cache_root()
         n = 0
         try:
@@ -111,9 +112,26 @@ class CacheMixin:
                         pass
         except Exception:
             pass
+        # 插图缓存（<缓存根>/art/）：同为可重建的派生数据，随正文缓存一并清除；
+        # 只动 art 子目录，绝不碰 sources（书源备份）与 lan（局域网同步数据）
+        art_n = 0
+        art_root = os.path.join(d, "art")
+        try:
+            if os.path.isdir(art_root):
+                art_n = len(os.listdir(art_root))
+                shutil.rmtree(art_root, ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            self._cache.clear()
+        except Exception:
+            pass
         if size_lbl is not None:
             self._update_cache_size_label(size_lbl)
-        messagebox.showinfo(_T("已清除"), _T("已清除 {n} 个缓存文件。").format(n=n))
+        msg = _T("已清除 {n} 个缓存文件。").format(n=n + art_n)
+        if art_n:
+            msg += "\n" + _T("其中插图 {a} 张（下次打开带图书籍会自动重建）。").format(a=art_n)
+        messagebox.showinfo(_T("已清除"), msg)
     def _do_transfer_cache(self, old_dir, new_dir, kind="text"):
         """把 old_dir 的内容移动到 new_dir，并切换对应设置。
 

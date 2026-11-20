@@ -5,6 +5,20 @@
 
 ## 已实装（勾选留档）
 
+### v2.3.1（2026-11-20 归档）：epub 插图显示 + 黑图修复 + 点击放大
+
+> 起因：用户 2026-11-19 转来读者反馈「epub 格式不显示图片」。范围收窄为「带插图的轻小说 / 网文」，**不做纯漫画书**（不做整页图连续翻页、不做图片缩放条）。
+
+- [x] **解析层**：`book_loader.py` 新增 `Chapter.art`（`[[anchor, 相对文件名], ...]`）与 `BookContent.art_names()`；`_ArtExtractor` 用私有区字符（U+E000/U+E001 包裹序号）给每个 `<img>` / `<image>`（含 `xlink:href`）打位置标记，正文纯文本流程不变；`_parse_epub` 重写为按页收集「图片 src 列表 + 落盘任务」，`_store_art` 按 sha1 命名、`.part` + `os.replace` 原子落盘、单图 24MB 上限、`art_dir=None` 零写盘；`_finalize` 从 `len>=20` 放宽为 `len>=20 or c.art`（纯图页不再被丢）
+- [x] **纯图页不新增章节**：图片挂到下一章 anchor 0（书末页挂末章末），章节数 / 索引 / `cum[]` 不变，PC 与安卓进度、书签零影响
+- [x] **缓存口径**：`storage.art_dir(custom=None)` → `<缓存根>/art`；`CONTENT_CACHE_VERSION` 8→9；缓存 JSON 只存相对 sha1 文件名，**绝不写绝对路径**；`_load_book` 发现版本对但 art 文件缺失时落回源文件重解析
+- [x] **同步口径**：art **不进** WebDAV / 局域网同步（只传 `library.json`、进度书签、`sources/<bid>.<ext>`），换设备由本机从已同步源文件重新解出
+- [x] **渲染层**：`reader_ui._insert_body_with_art` 按 `_line_map` 插入图块；行内小图在段落末尾降级为图块；`_line_map` 条目 `(行号, 显示起始偏移, 原文起始偏移, 是否插图行)`，所有偏移换算只走它（彻底弃用 Tk `count -chars`）
+- [x] **黑图修复**：P / PA / LA / 1 模式先转 RGBA，`_flatten_on_bg` 用 `winfo_rgb` 取正文底色（米黄 `#DCD1B5` → (220,209,181)）铺底后再 `ImageTk`；根因是原代码把透明区 `convert("RGB")` 填成纯黑
+- [x] **点击放大**：`_art_src` 登记 `PhotoImage` 名 → 图片路径；`_on_art_click` 用 `text.index("@x,y")` 与 `text.image_names()` 比对命中才弹窗；预览窗深色 `#181818`、按屏幕 92%×88% 适屏、滚轮 1.12 倍步进钳 0.2×~4×、双击复位、Esc/单击关闭
+- [x] **外链不联网**：`http(s)` / `data:` / `//` 一律跳过，SVG 不栅格化，同图按 sha1 去重；四语言补「其中插图 {a} 张…」「插图预览」
+- [x] **回归**：`tests/test_epub_images.py` 16 项（自建 zip 样书）+ GUI 级 9 项 + 缺图重建实测恢复；`test_cache_layout`、`test_sync_engine_v2`、`test_word_highlight`、`test_speech_word`、`test_rate_multiplier` 全绿
+
 ### v2.3.0（2026-11-18 归档）：Edge 语音逐词高亮
 
 - [x] **语速改按真实倍数标注（用户 2026-11-18 要求）**：界面从「50~400」改为 **0.50×~2.00×（步进 0.05×，如 1.55×）**；`content_key.py` 新增 `multiplier_of_rate` / `rate_of_multiplier` / `format_multiplier` 与 `RATE_MIN/RATE_MAX/RATE_STEP`；滑块、快捷键（Ctrl+←/→ 每次 0.05×）、缓存管理器参数行全部改成倍数显示；内部仍存 100~400 整数标度，**缓存目录 pct 口径不变**，老缓存不受影响

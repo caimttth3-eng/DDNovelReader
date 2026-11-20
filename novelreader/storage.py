@@ -39,6 +39,15 @@ def resolve_cache_dir(custom):
     return cache_dir()
 
 
+def art_dir(custom=None):
+    """插图缓存目录：`<正文解析缓存根>/art/`。
+
+    插图是派生数据（可从源文件重新解压），随正文缓存一起转移/清除，
+    因此放在缓存根下的 art 子目录，不单独占用数据目录。
+    """
+    return os.path.join(resolve_cache_dir(custom), "art")
+
+
 def tts_cache_dir():
     """整本语音缓存默认根目录：`<数据目录>/tts_cache/<语音>/<语速>/<book_id>/`。"""
     d = os.path.join(data_dir(), "tts_cache")
