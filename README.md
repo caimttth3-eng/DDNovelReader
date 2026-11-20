@@ -216,7 +216,7 @@ DDNovelReader/
 - 朗读：pyttsx3（Windows SAPI5）+ edge-tts 7.3.1（微软 Edge 神经语音）
 - 音频播放：Windows MCI（winmm.dll）+ pygame（macOS/Linux 播放、Edge 音频首尾静音裁剪解码）
 - 音量控制：pycaw（Windows Core Audio，进程级音量）
-- 解析：自写解析引擎（txt/epub/html：zipfile + OPF/spine 解析；mobi/azw3：mobi 库）、pypdfium2（pdf，PDFium 引擎）、python-docx（docx）、zipfile（zip）、chmlib 内置库（chm，Zig 交叉编译 Windows/macOS/Linux 三平台）
+- 解析：自写解析引擎（txt/epub/html：zipfile + OPF/spine 解析，epub 同时解出内嵌插图并按内容哈希存入 `cache/art`；mobi/azw3：mobi 库）、pypdfium2（pdf，PDFium 引擎）、python-docx（docx）、zipfile（zip）、chmlib 内置库（chm，Zig 交叉编译 Windows/macOS/Linux 三平台）
 - 拖拽：tkinterdnd2（Tcl tkdnd 扩展）
 - 系统托盘：pystray（Windows 通知区 / macOS 菜单栏 / Linux 通知区，macOS 后端依赖 pyobjc-framework-Cocoa / Quartz）
 - 打包：PyInstaller **双形态**（onedir 秒开版 + onefile 单文件版，内置 Tcl/Tk 与全部依赖，绿色免安装）
