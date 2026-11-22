@@ -108,10 +108,18 @@ def main():
     for key in ("state", "port", "uptime", "requests", "active", "last_request", "last_error"):
         check("状态字段 %s 存在" % key, key in st, sorted(st))
 
-    # 4) 书架「一键同步」按钮已加
-    check("书架一键同步按钮存在", hasattr(app, "btn_shelf_sync"))
-    check("按钮文字为一键同步", str(app.btn_shelf_sync.cget("text")) == "一键同步",
-          app.btn_shelf_sync.cget("text"))
+    # 4) 书架底部两个方向按钮（v2.3.2 起拆成保存到云端 / 从云端读取）
+    check("书架保存到云端按钮存在", hasattr(app, "btn_shelf_push"))
+    check("书架从云端读取按钮存在", hasattr(app, "btn_shelf_pull"))
+    check("保存按钮文字为保存到云端", str(app.btn_shelf_push.cget("text")) == "保存到云端",
+          app.btn_shelf_push.cget("text"))
+    check("读取按钮文字为从云端读取", str(app.btn_shelf_pull.cget("text")) == "从云端读取",
+          app.btn_shelf_pull.cget("text"))
+    # 底部按钮区必须真的占位，不能被书架列表挤掉
+    check("书架底部按钮区有高度",
+          any(w.winfo_height() > 0 for w in app._left.winfo_children()
+              if w.winfo_class() == "Frame" and w.pack_info().get("side") == "bottom"),
+          [(w.winfo_class(), w.winfo_height()) for w in app._left.winfo_children()])
 
     # 5) 数据同步弹窗：两页签 + 局域网控件 + 副标题已修正
     dlg = _SyncDlg(app)
