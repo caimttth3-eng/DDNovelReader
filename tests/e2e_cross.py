@@ -159,7 +159,7 @@ def status(args):
     st = make_storage(pc_base())
     cli = WebDAVClient(SERVER, USER, PASS, args.dir, verify_tls=False)
     eng = SyncEngine(st, settings_of(args.dir))
-    remote = eng.read_remote_books(cli)
+    remote, _etags = eng.read_remote_books(cli)
     print("远端记录 %d 条：" % len(remote))
     for k, r in sorted(remote.items()):
         print("  %s deleted=%s title=%s progress=%s upd=%s" % (

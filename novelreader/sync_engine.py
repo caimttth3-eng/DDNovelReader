@@ -277,6 +277,7 @@ class WebDAVClient:
             is_dir = False
             size = 0
             mtime = 0.0
+            etag = ""
             for prop in node.iter(_DAV + "prop"):
                 for st in prop.iter(_DAV + "resourcetype"):
                     for _c in list(st):
@@ -289,9 +290,12 @@ class WebDAVClient:
                         size = 0
                 for lm in prop.iter(_DAV + "getlastmodified"):
                     mtime = _parse_http_date((lm.text or "").strip())
+                for et in prop.iter(_DAV + "getetag"):
+                    etag = (et.text or "").strip()
             sub = norm[len(base_path.rstrip("/")):].strip("/") if path.startswith(base_path.rstrip("/")) else norm
             sub = "/".join(s for s in sub.split("/") if s)
-            out.append({"name": name, "rel": sub, "is_dir": is_dir, "size": size, "mtime": mtime})
+            out.append({"name": name, "rel": sub, "is_dir": is_dir, "size": size,
+                        "mtime": mtime, "etag": etag})
         return out
 
     def mkdir(self, rel):
@@ -324,16 +328,26 @@ class WebDAVClient:
             return None
         return body
 
-    def put(self, rel, data, atomic=True):
-        """写文件；优先 .part + MOVE 保证中途失败不留半截 JSON。"""
+    def put(self, rel, data, atomic=True, etag=None, content_type="application/json; charset=utf-8"):
+        """写文件。
+
+        - etag 非空时走**单请求条件写**（If-Match），服务器发现远端已被别人改过就返回 412，
+          调用方据此重读再合并（避免整条覆盖掉对端的新数据）。
+        - 没有 etag 时保持 .part + MOVE，保证中途断网不留半截 JSON。
+        """
+        if etag:
+            self.request("PUT", rel, data=data,
+                         headers={"Content-Type": content_type, "If-Match": etag},
+                         allow=(200, 201, 204))
+            return True
         if not atomic:
             self.request("PUT", rel, data=data,
-                         headers={"Content-Type": "application/json; charset=utf-8"},
+                         headers={"Content-Type": content_type},
                          allow=(200, 201, 204))
             return True
         tmp = rel + ".part"
         self.request("PUT", tmp, data=data,
-                     headers={"Content-Type": "application/json; charset=utf-8"},
+                     headers={"Content-Type": content_type},
                      allow=(200, 201, 204, 207))
         try:
             self.request("MOVE", tmp, data=b"", headers={
@@ -730,8 +744,9 @@ class SyncEngine:
             pass
 
     def read_remote_books(self, cli):
-        """返回 {content_key: record}。"""
+        """返回 ({content_key: record}, {content_key: etag})。"""
         out = {}
+        etags = {}
         for ent in cli.propfind(self._books_dir(), depth="1"):
             name = ent.get("name") or ""
             if ent.get("is_dir") or not name.lower().endswith(".json"):
@@ -751,9 +766,78 @@ class SyncEngine:
                 continue
             if isinstance(rec, dict) and rec.get("content_key"):
                 out[str(rec["content_key"])] = rec
-        return out
+                if ent.get("etag"):
+                    etags[str(rec["content_key"])] = ent["etag"]
+        return out, etags
+
+    @staticmethod
+    def _push_needed(lrec, rrec):
+        """本地是否有值得写回远端的东西（不比较"谁更新"，只判断"本机有没有对端没有的"）。"""
+        if not isinstance(rrec, dict) or rrec.get("deleted"):
+            return True
+        l_pat = _num(lrec.get("progress_at"))
+        r_pat = _num(rrec.get("progress_at")) or _num(rrec.get("updated_at"))
+        l_bat = _num(lrec.get("bookmarks_at"))
+        r_bat = _num(rrec.get("bookmarks_at")) or _num(rrec.get("updated_at"))
+        if l_pat > r_pat + TIME_TOL:
+            return True
+        if l_bat > r_bat + TIME_TOL:
+            return True
+        lid = {str(b.get("id")) for b in (lrec.get("bookmarks") or []) if b.get("id")}
+        rid = {str(b.get("id")) for b in (rrec.get("bookmarks") or []) if b.get("id")}
+        if lid - rid:
+            return True
+        return not rrec.get("content_key")
 
     # ---------- 合并 ----------
+    @staticmethod
+    def merge_record(lrec, rrec, device_name=""):
+        """以远端记录为基底做**字段级合并**，返回要写回远端的完整记录。
+
+        - 进度：只有本地 progress_at 更新（超出容差）才替换远端进度，否则保留远端
+        - 书签：两边并集（按 id 取较新），bookmarks_at 取两端最大，任何一边都不丢
+        - 元信息（书名/字数/章数/指纹/书源）：只在远端缺失时补，**永不覆盖**对端
+        - 删除状态由墓碑逻辑单独处理，这里只处理未删除的记录
+        """
+        base = dict(rrec) if isinstance(rrec, dict) else {}
+        was_tomb = bool(base.get("deleted"))
+        # 走到这里的都是本地仍在架上的书：远端若留的是墓碑，写回时必须是"活记录"
+        base.pop("deleted", None)
+        base.pop("deleted_at", None)
+        l_pat = _num(lrec.get("progress_at"))
+        r_pat = _num(base.get("progress_at")) or _num(base.get("updated_at"))
+        if (was_tomb or l_pat > r_pat + TIME_TOL) and isinstance(lrec.get("progress"), dict):
+            base["progress"] = lrec["progress"]
+            base["progress_at"] = round(l_pat, 3)
+        elif l_pat and not _num(base.get("progress_at")):
+            base["progress_at"] = round(l_pat, 3)
+
+        l_bms = lrec.get("bookmarks") if isinstance(lrec.get("bookmarks"), list) else []
+        r_bms = base.get("bookmarks") if isinstance(base.get("bookmarks"), list) else []
+        merged, _changed = SyncEngine._merge_bookmarks(l_bms, r_bms)
+        if merged:
+            base["bookmarks"] = merged
+        l_bat = _num(lrec.get("bookmarks_at"))
+        r_bat = _num(base.get("bookmarks_at"))
+        if was_tomb or l_bat > r_bat + TIME_TOL:
+            base["bookmarks_at"] = round(l_bat, 3)
+        elif r_bat and not _num(base.get("bookmarks_at")):
+            base["bookmarks_at"] = round(r_bat, 3)
+
+        for field in ("content_key", "content_key_version", "title", "author", "format",
+                      "total_chars", "chapter_count", "source"):
+            if not base.get(field) and lrec.get(field):
+                base[field] = lrec[field]
+        base.setdefault("schema", SCHEMA_VERSION)
+        base["progress_at"] = round(_num(base.get("progress_at")), 3)
+        base["bookmarks_at"] = round(_num(base.get("bookmarks_at")), 3)
+        base["updated_at"] = round(max(_num(base.get("progress_at")), _num(base.get("bookmarks_at"))), 3)
+        base["synced_at"] = round(time.time(), 3)
+        if device_name:
+            base["device"] = device_name
+        base.pop("_etag", None)
+        return base
+
     @staticmethod
     def _merge_bookmarks(local_bms, remote_bms):
         """按 id 取并集；同 id 取较新的 created_at 内容。返回 (合并列表, 是否变化)。"""
@@ -820,18 +904,26 @@ class SyncEngine:
         return res
 
     # ---------- 主流程 ----------
-    def sync(self):
-        """双向同步，返回 report dict。
+    def sync(self, mode="both", dry_run=False):
+        """同步一次，返回 report dict。
+
+        mode:
+          - "both"：双向合并（自动同步用）
+          - "push"：只「保存到云端」——把本机改动推上去，不使用远端进度覆盖本机
+          - "pull"：只「从云端读取」——把远端更新拉下来，不推送本机改动
+        dry_run=True 时只统计"将要做的事"，一个字节都不写（界面预览用）。
 
         合并规则（与安卓端 sync_engine.dart 完全一致）：
         - 进度：比 progress_at，新者胜（不看章节先后，回看也算新）
-        - 书签：按 id 并集，同 id 取 created_at 较新的一份
+        - 书签：按 id 并集，同 id 取 created_at 较新的一份，任何一边都不丢
+        - 元信息：只在远端缺失时补，永不覆盖对端
         - 删除：墓碑记录（deleted/deleted_at），对端删除时间更新则本地也删
         """
         report = {"ok": False, "pushed": 0, "pulled": 0, "skipped": 0,
                   "imported": 0, "removed": 0, "deleted": 0,
                   "remote_only": [], "lines": [], "error": "",
-                  "progress_applied": {}, "removed_bids": []}
+                  "progress_applied": {}, "removed_bids": [],
+                  "mode": mode, "dry_run": bool(dry_run), "conflicts": 0}
         if not self.configured():
             report["error"] = _T("未配置 WebDAV 服务器地址")
             return report
@@ -843,12 +935,14 @@ class SyncEngine:
             self.prepare_remote(cli)
             device_id, device_name = ensure_device(self.storage, self.settings)
             local = self.local_records()
-            remote = self.read_remote_books(cli)
+            remote, remote_etags = self.read_remote_books(cli)
+            do_pull = mode in ("both", "pull")
+            do_push = mode in ("both", "push")
             local_del = dict(self.storage.deletions() or {})
 
             local_updates = 0
             # ---- 1) 远端 → 本地 ----
-            for key, rec in remote.items():
+            for key, rec in (remote.items() if do_pull else ()):
                 if rec.get("deleted"):
                     bid_item = local.get(key)
                     tomb_t = _num(rec.get("deleted_at")) or _num(rec.get("updated_at"))
@@ -860,7 +954,8 @@ class SyncEngine:
                         if book_activity_of(book) >= tomb_t - TIME_TOL:
                             report["skipped"] += 1
                             continue
-                        self.storage.remove_book(bid, deleted_at=tomb_t)
+                        if not dry_run:
+                            self.storage.remove_book(bid, deleted_at=tomb_t)
                         local.pop(key, None)
                         report["removed"] += 1
                         report["removed_bids"].append(bid)
@@ -868,8 +963,9 @@ class SyncEngine:
                             t=_lrec.get("title") or rec.get("title") or key))
                         local_updates += 1
                     # 远端已删且本机也没有：记下墓碑，避免以后又把这本书拉回来
-                    self.storage.mark_deleted(key, rec.get("title") or "",
-                                              tomb_t, save=False)
+                    if not dry_run:
+                        self.storage.mark_deleted(key, rec.get("title") or "",
+                                                  tomb_t, save=False)
                     local_del[key] = {"deleted_at": tomb_t, "title": rec.get("title") or ""}
                     self._drop_remote_source(cli, key, rec)
                     continue
@@ -882,6 +978,11 @@ class SyncEngine:
                 item = local.get(key)
                 if item is None:
                     # 远端独有：有源文件就下载落成书架条目，否则只报告
+                    if dry_run:
+                        title = (rec.get("title") or "").strip()
+                        report["imported"] += 1
+                        report["lines"].append(_T("↓ 将新增 {t}").format(t=title or key))
+                        continue
                     got = self._import_remote_book(cli, key, rec)
                     if got:
                         report["imported"] += 1
@@ -896,6 +997,10 @@ class SyncEngine:
                 l_bat = _num(lrec.get("bookmarks_at"))
                 r_bat = _num(rec.get("bookmarks_at")) or _num(rec.get("updated_at"))
                 if r_pat > l_pat + TIME_TOL or r_bat > l_bat + TIME_TOL:
+                    if dry_run:
+                        report["pulled"] += 1
+                        report["lines"].append(_T("↓ 将更新 {t}").format(t=lrec.get("title") or key))
+                        continue
                     res = self.apply_remote(bid, rec)
                     if res.get("progress"):
                         report["pulled"] += 1
@@ -926,32 +1031,59 @@ class SyncEngine:
                 local = self.local_records()
                 local_del = dict(self.storage.deletions() or {})
 
-            # ---- 2) 本地 → 远端（按字段判断，任一字段更新就推整条） ----
-            for key, (bid, lrec) in local.items():
-                rrec = remote.get(key)
-                if rrec is not None and not rrec.get("deleted"):
-                    l_pat = _num(lrec.get("progress_at"))
-                    r_pat = _num(rrec.get("progress_at")) or _num(rrec.get("updated_at"))
-                    l_bat = _num(lrec.get("bookmarks_at"))
-                    r_bat = _num(rrec.get("bookmarks_at")) or _num(rrec.get("updated_at"))
-                    if l_pat <= r_pat + TIME_TOL and l_bat <= r_bat + TIME_TOL:
+            # ---- 2) 本地 → 远端：字段级合并后写回，绝不整条覆盖对端新数据 ----
+            if do_push:
+                for key, (bid, lrec) in local.items():
+                    rrec = remote.get(key)
+                    if rrec is not None and rrec.get("deleted"):
+                        # 远端墓碑：与拉取阶段同一条规则 —— 本机这本书在删除之后又被
+                        # 读过/加过书签/重新导入过（活动时间不早于删除），就判为"用户又用起来了"，
+                        # 推一条活记录把它复活；否则尊重对方删除，本机跟随删除。
+                        r_del = _num(rrec.get("deleted_at")) or _num(rrec.get("updated_at"))
+                        book = self.storage.all_books().get(bid) or {}
+                        if not (book_activity_of(book) >= r_del - TIME_TOL):
+                            continue
+                    if not self._push_needed(lrec, rrec):
                         continue
-                payload = json.dumps(lrec, ensure_ascii=False, indent=1).encode("utf-8")
-                cli.put(self._remote_book_path(key), payload)
-                report["pushed"] += 1
-                report["lines"].append("↑ %s" % (lrec.get("title") or key))
+                    if dry_run:
+                        report["pushed"] += 1
+                        report["lines"].append(_T("↑ 将保存 {t}").format(t=lrec.get("title") or key))
+                        continue
+                    merged = self.merge_record(lrec, rrec or {}, device_name)
+                    payload = json.dumps(merged, ensure_ascii=False, indent=1).encode("utf-8")
+                    path = self._remote_book_path(key)
+                    try:
+                        cli.put(path, payload, etag=remote_etags.get(key) or None)
+                    except WebDAVError as e:
+                        if getattr(e, "status", None) not in (409, 412):
+                            raise
+                        # 对端在我们读取之后刚改过这条记录：重读 → 重新合并 → 再写一次
+                        report["conflicts"] += 1
+                        fresh = None
+                        try:
+                            raw = cli.get(path)
+                            fresh = json.loads(raw.decode("utf-8")) if raw else None
+                        except Exception:
+                            fresh = None
+                        merged = self.merge_record(lrec, fresh or {}, device_name)
+                        payload = json.dumps(merged, ensure_ascii=False, indent=1).encode("utf-8")
+                        cli.put(path, payload, etag=None)
+                    report["pushed"] += 1
+                    report["lines"].append(_T("↑ {t}").format(t=lrec.get("title") or key))
 
             # ---- 3) 本地删除 → 远端墓碑 ----
-            for key, dent in list(local_del.items()):
+            for key, dent in (list(local_del.items()) if do_push else ()):
                 if key in local:
                     # 书还在本地（刚重新导入）= 撤销墓碑，不再推删除
-                    self.storage.clear_deletion(key, save=False)
+                    if not dry_run:
+                        self.storage.clear_deletion(key, save=False)
                     continue
                 d_t = _num(dent.get("deleted_at"))
                 if not d_t:
                     continue
                 if time.time() - d_t > TOMBSTONE_TTL:
-                    self.storage.clear_deletion(key, save=False)
+                    if not dry_run:
+                        self.storage.clear_deletion(key, save=False)
                     continue
                 rrec = remote.get(key)
                 if rrec is not None:
@@ -962,6 +1094,10 @@ class SyncEngine:
                     elif _num(rrec.get("updated_at")) > d_t + TIME_TOL:
                         # 远端在本机删除之后还更新过（对端仍在读这本书）：以对端为准，不推删除
                         continue
+                if dry_run:
+                    report["deleted"] += 1
+                    report["lines"].append(_T("↑ 将删除 {t}").format(t=dent.get("title") or key))
+                    continue
                 payload = json.dumps(self._tombstone_record(key, dent, device_name),
                                      ensure_ascii=False, indent=1).encode("utf-8")
                 cli.put(self._remote_book_path(key), payload)
@@ -969,40 +1105,44 @@ class SyncEngine:
                 report["lines"].append(_T("↑ 删除事件 {t}").format(t=dent.get("title") or key))
                 self._drop_remote_source(cli, key, rrec or {})
 
-            try:
-                self.storage.save()
-            except Exception:
-                pass
+            if local_updates and not dry_run:
+                try:
+                    self.storage.save()
+                except Exception:
+                    pass
 
             # 书源文件：另一台机器要能把本机独有的书拉过去，记录里得有源文件
-            try:
-                src_up = self.upload_sources(cli, local)
-                if src_up:
-                    report["lines"].append(_T("↑ 书源文件 {n} 个").format(n=src_up))
-            except Exception:
-                pass
+            if do_push and not dry_run:
+                try:
+                    src_up = self.upload_sources(cli, local)
+                    if src_up:
+                        report["lines"].append(_T("↑ 书源文件 {n} 个").format(n=src_up))
+                except Exception:
+                    pass
 
             # 设备登记
             try:
-                dev = {
-                    "schema": SCHEMA_VERSION,
-                    "device_id": device_id,
-                    "device_name": device_name,
-                    "last_sync": round(time.time(), 3),
-                    "book_count": len(local),
-                    "platform": _platform_tag(),
-                }
-                cli.put("v1/devices/%s.json" % device_id,
-                        json.dumps(dev, ensure_ascii=False, indent=1).encode("utf-8"))
+                if not dry_run:
+                    dev = {
+                        "schema": SCHEMA_VERSION,
+                        "device_id": device_id,
+                        "device_name": device_name,
+                        "last_sync": round(time.time(), 3),
+                        "book_count": len(local),
+                        "platform": _platform_tag(),
+                    }
+                    cli.put("v1/devices/%s.json" % device_id,
+                            json.dumps(dev, ensure_ascii=False, indent=1).encode("utf-8"))
             except WebDAVError:
                 pass
 
-            now = time.time()
-            self.settings["sync_last_time"] = now
-            try:
-                self.storage.set_setting("sync_last_time", now)
-            except Exception:
-                pass
+            if not dry_run:
+                now = time.time()
+                self.settings["sync_last_time"] = now
+                try:
+                    self.storage.set_setting("sync_last_time", now)
+                except Exception:
+                    pass
             report["ok"] = True
             return report
         except WebDAVError as e:

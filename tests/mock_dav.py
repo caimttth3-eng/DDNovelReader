@@ -58,6 +58,14 @@ class DavHandler(BaseHTTPRequestHandler):
         self.end_headers()
         return True
 
+    @staticmethod
+    def _etag_of(path):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return ""
+        return '"%d-%d"' % (st.st_mtime_ns, st.st_size)
+
     def _body(self):
         te = (self.headers.get("Transfer-Encoding") or "").lower()
         if "chunked" in te:
@@ -115,6 +123,7 @@ class DavHandler(BaseHTTPRequestHandler):
             else:
                 parts.append("<D:resourcetype/>")
                 parts.append("<D:getcontentlength>%d</D:getcontentlength>" % st.st_size)
+                parts.append("<D:getetag>%s</D:getetag>" % sx.escape(self._etag_of(p)))
             parts.append("</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>")
             parts.append("</D:response>")
         parts.append("</D:multistatus>")
@@ -145,12 +154,22 @@ class DavHandler(BaseHTTPRequestHandler):
         if not self._auth_ok():
             return self._deny()
         full = self._abs()
-        os.makedirs(os.path.dirname(full), exist_ok=True)
         data = self._body()
+        # If-Match 条件写：与真实 WebDAV 一致，对端已改过就 412
+        want = (self.headers.get("If-Match") or "").strip()
+        cur = self._etag_of(full)
+        if want and want != "*" and cur and want != cur:
+            self.send_response(412)
+            self.send_header("ETag", cur)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        os.makedirs(os.path.dirname(full), exist_ok=True)
         existed = os.path.exists(full)
         with open(full, "wb") as f:
             f.write(data)
         self.send_response(204 if existed else 201)
+        self.send_header("ETag", self._etag_of(full))
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -208,7 +227,6 @@ class DavHandler(BaseHTTPRequestHandler):
 
 class MockDav:
     """with MockDav() as dav: dav.url → http://127.0.0.1:<port>/dav"""
-
     def __init__(self, root):
         self.root = os.path.abspath(root)
         os.makedirs(self.root, exist_ok=True)
@@ -226,3 +244,22 @@ class MockDav:
         self.srv.shutdown()
         self.srv.server_close()
         return False
+
+
+if __name__ == "__main__":
+    # 固定端口的独立进程模式：跨端联调（PC ⇄ 安卓 flutter test）共用一台
+    # 用法： python tests/mock_dav.py --root <目录> --port 8080
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "_dav_root"))
+    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--user", default="demo")
+    ap.add_argument("--pass", dest="pw", default="demo")
+    a = ap.parse_args()
+    root = os.path.abspath(a.root)
+    os.makedirs(root, exist_ok=True)
+    handler = type("H", (DavHandler,), {"root": root, "user": a.user, "pw": a.pw})
+    srv = ThreadingHTTPServer(("127.0.0.1", a.port), handler)
+    print("mock dav: http://127.0.0.1:%d/dav (root=%s)" % (a.port, root), flush=True)
+    srv.serve_forever()

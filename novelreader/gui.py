@@ -624,7 +624,6 @@ class NovelReaderBase:
         shelf_header.pack(fill="x")
 
         shelf_frame = tk.Frame(left)
-        shelf_frame.pack(fill="both", expand=True, pady=(4, 4))
         # 书架用 Treeview（详细信息视图）
         cols = ("progress", "title", "size", "time")
         self.shelf_tree = ttk.Treeview(shelf_frame, columns=cols, show="headings", selectmode="extended")
@@ -670,18 +669,28 @@ class NovelReaderBase:
         self.shelf_menu.add_command(label=_T("删除文件（清空缓存）"), command=lambda: self._remove_book(True))
         self._shelf_del_clear_idx = self.shelf_menu.index("end")
 
-        btn_row = tk.Frame(left)
+        # 底部按钮区先占位（side=bottom），保证按钮不会被书架列表挤掉
+        bottom = tk.Frame(left)
+        bottom.pack(side="bottom", fill="x")
+        btn_row = tk.Frame(bottom)
         btn_row.pack(fill="x")
         ttk.Button(btn_row, text=_T("＋ 添加书籍"), command=self._add_book).pack(fill="x", pady=2)
-        back_row = tk.Frame(left)
+        # 同步拆两个方向（v2.3.2）：保存到云端 / 从云端读取；局域网优先、其次云端，共用串行队列
+        sync_row = tk.Frame(bottom)
+        sync_row.pack(fill="x")
+        self.btn_shelf_push = ttk.Button(sync_row, text=_T("保存到云端"),
+                                         command=lambda: self._sync_shelf_now("push"))
+        self.btn_shelf_push.pack(side="left", fill="x", expand=True, pady=2, padx=(0, 2))
+        self.btn_shelf_pull = ttk.Button(sync_row, text=_T("从云端读取"),
+                                         command=lambda: self._sync_shelf_now("pull"))
+        self.btn_shelf_pull.pack(side="left", fill="x", expand=True, pady=2, padx=(2, 0))
+        back_row = tk.Frame(bottom)
         back_row.pack(fill="x")
         ttk.Button(back_row, text=_T("备份书架"), command=self._backup_library).pack(
             side="left", fill="x", expand=True, pady=2, padx=(0, 2))
         ttk.Button(back_row, text=_T("还原书架"), command=self._restore_library).pack(
             side="left", fill="x", expand=True, pady=2, padx=(2, 2))
-        # 一键同步（v2.2.9）：局域网优先、其次云端；两者共用串行队列，结果落状态栏
-        self.btn_shelf_sync = ttk.Button(back_row, text=_T("一键同步"), command=self._sync_shelf_now)
-        self.btn_shelf_sync.pack(side="left", fill="x", expand=True, pady=2, padx=(2, 0))
+        shelf_frame.pack(fill="both", expand=True, pady=(0, 4))
         self._shelf_visible = False
 
         read_frame = tk.Frame(self._inner_paned)

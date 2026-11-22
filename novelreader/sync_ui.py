@@ -153,6 +153,13 @@ class SyncMixin:
         except Exception:
             return False
 
+    def _lan_running(self):
+        srv = getattr(self, "_lan_srv", None)
+        try:
+            return bool(srv is not None and srv.running())
+        except Exception:
+            return False
+
     def _lan_status(self):
         """给界面用的状态快照（服务未创建时给出"未启用"）。"""
         srv = getattr(self, "_lan_srv", None)
@@ -244,8 +251,18 @@ class SyncMixin:
         })
         return overlay
 
-    def _sync_run_channel(self, channel, silent=False, on_done=None):
-        """跑一次同步（channel = cloud / lan）。全局单飞：已在跑则直接返回 False。"""
+    def _sync_run_channel(self, channel, silent=False, on_done=None, mode="both", dry_run=False):
+        """跑一次同步（channel = cloud / lan；mode = both / push / pull）。全局单飞。"""
+        if dry_run:
+            # 预览不占用全局单飞锁（只读，不改任何数据）
+            try:
+                if channel == "lan":
+                    engine = SyncEngine(self.storage, self._lan_settings_overlay())
+                else:
+                    engine = SyncEngine(self.storage, self.settings)
+                return engine.sync(mode=mode, dry_run=True)
+            except Exception as e:                               # noqa: BLE001
+                return {"ok": False, "error": str(e), "kind": channel, "dry_run": True}
         if not _RUN_LOCK.acquire(blocking=False):
             if on_done is not None and not silent:
                 try:
@@ -286,10 +303,11 @@ class SyncMixin:
 
         def _work():
             try:
-                report = engine.sync()
+                report = engine.sync(mode=mode)
             except Exception as e:                               # noqa: BLE001
                 report = {"ok": False, "error": str(e)}
             report["kind"] = channel
+            report["mode"] = mode
             try:
                 if report.get("imported") or report.get("pulled") or report.get("removed"):
                     self.root.after(0, self._after_sync_report, report)
@@ -312,12 +330,12 @@ class SyncMixin:
         """兼容旧调用：云端通道。"""
         return self._sync_run_channel("cloud", silent=silent, on_done=on_done)
 
-    def _lan_merge_now(self, silent=False, on_done=None):
-        return self._sync_run_channel("lan", silent=silent, on_done=on_done)
+    def _lan_merge_now(self, silent=False, on_done=None, mode="both"):
+        return self._sync_run_channel("lan", silent=silent, on_done=on_done, mode=mode)
 
-    # ---------------- 书架一键同步 ----------------
-    def _sync_shelf_now(self):
-        """书架底部「一键同步」：局域网优先，其次云端；串行，结果落状态栏。"""
+    # ---------------- 书架同步（保存到云端 / 从云端读取） ----------------
+    def _sync_shelf_now(self, mode="both"):
+        """书架底部「保存到云端」/「从云端读取」：局域网优先，其次云端；串行，结果落状态栏。"""
         if _RUN_LOCK.locked():
             self._flash_status(_T("已有同步任务在进行中"))
             return
@@ -328,25 +346,40 @@ class SyncMixin:
                                 _T("还没有配置同步。请到「设置 → 数据同步」填写云端 WebDAV\n"
                                    "或开启局域网本地同步。"))
             return
-        self._flash_status(_T("正在同步…"))
+        self._flash_status(_T("正在检查差异…") if mode != "both" else _T("正在同步…"))
+        self._shelf_sync_mode = mode
 
         def _after_lan(rep):
             if not cloud_on:
                 return
-            self._sync_run_channel("cloud", silent=True)
+            self._sync_run_channel("cloud", silent=True, mode=mode)
 
         if lan_on:
-            if not self._lan_merge_now(silent=True, on_done=_after_lan) and cloud_on:
-                self._sync_run_channel("cloud", silent=True)
+            if not self._lan_merge_now(silent=True, on_done=_after_lan, mode=mode) and cloud_on:
+                self._sync_run_channel("cloud", silent=True, mode=mode)
         else:
-            self._sync_run_channel("cloud", silent=True)
+            self._sync_run_channel("cloud", silent=True, mode=mode)
 
     def _flash_sync_result(self, report):
         if not isinstance(report, dict):
             return
+        mode = report.get("mode") or getattr(self, "_shelf_sync_mode", "both")
         if report.get("ok"):
-            self._flash_status(_T("同步完成：上传 {p} 本，下载 {d} 本").format(
-                p=report.get("pushed", 0), d=report.get("pulled", 0)))
+            if mode == "push":
+                msg = _T("已保存到云端：上传 {p} 本").format(p=report.get("pushed", 0))
+                if report.get("deleted"):
+                    msg += _T("，删除事件 {d} 个").format(d=report.get("deleted", 0))
+                self._flash_status(msg)
+            elif mode == "pull":
+                msg = _T("已从云端读取：更新 {p} 本").format(p=report.get("pulled", 0))
+                if report.get("imported"):
+                    msg += _T("，新增 {n} 本").format(n=report.get("imported", 0))
+                if report.get("removed"):
+                    msg += _T("，移除 {n} 本").format(n=report.get("removed", 0))
+                self._flash_status(msg)
+            else:
+                self._flash_status(_T("同步完成：上传 {p} 本，下载 {d} 本").format(
+                    p=report.get("pushed", 0), d=report.get("pulled", 0)))
         else:
             self._flash_status(_T("同步失败：{e}").format(e=report.get("error") or ""))
 
@@ -560,8 +593,13 @@ class _SyncDlg:
         btns.pack(fill="x", padx=6, pady=(8, 4))
         self.btn_test = ttk.Button(btns, text=_T("测试连接"), command=lambda: self._act("test"))
         self.btn_test.pack(side="left")
-        self.btn_sync = ttk.Button(btns, text=_T("立即同步"), command=lambda: self._act("sync"))
-        self.btn_sync.pack(side="left", padx=8)
+        self.btn_push = ttk.Button(btns, text=_T("保存到云端"), command=lambda: self._act("push"))
+        self.btn_push.pack(side="left", padx=(8, 4))
+        self.btn_pull = ttk.Button(btns, text=_T("从云端读取"), command=lambda: self._act("pull"))
+        self.btn_pull.pack(side="left")
+        tk.Label(parent, text=_T("保存：把本机改动推上去；读取：把云端更新拉下来。两者都按字段合并，不会用旧数据覆盖对方的新进度 / 书签。"),
+                 font=("微软雅黑", 9), fg="#5A5B5C", bg=self._bg, wraplength=520,
+                 justify="left").pack(anchor="w", padx=8, pady=(2, 0))
 
     def _build_lan(self, parent):
         top = tk.Frame(parent, bg=self._bg)
@@ -597,7 +635,8 @@ class _SyncDlg:
         btns.pack(fill="x", padx=6, pady=(8, 2))
         ttk.Button(btns, text=_T("启动服务"), command=self._lan_start_click).pack(side="left")
         ttk.Button(btns, text=_T("停止服务"), command=self._lan_stop_click).pack(side="left", padx=8)
-        ttk.Button(btns, text=_T("立即合并"), command=self._lan_merge_click).pack(side="left")
+        ttk.Button(btns, text=_T("保存到云端"), command=lambda: self._lan_merge_click("push")).pack(side="left")
+        ttk.Button(btns, text=_T("从云端读取"), command=lambda: self._lan_merge_click("pull")).pack(side="left", padx=(8, 0))
 
         box = tk.Frame(parent, bg=self._bg)
         box.pack(fill="x", padx=6, pady=(6, 2))
@@ -663,19 +702,80 @@ class _SyncDlg:
         self._log(_T("服务已停止"))
         self._refresh_lan()
 
-    def _lan_merge_click(self):
+    def _lan_merge_click(self, mode="both"):
+        """局域网方向按钮：先只读预览，确认后再真正合并/保存/读取。"""
         if self._busy:
             return
         self._collect()
         self._persist_lan()
-        if not self.app._lan_merge_now(silent=False, on_done=lambda rep: self._on_lan_result(rep)):
+        if mode not in ("push", "pull"):
+            if not self.app._lan_merge_now(silent=False, on_done=lambda rep: self._on_lan_result(rep),
+                                           mode=mode):
+                self._status(_T("已有同步任务在进行中"))
+            return
+        if not self.app._lan_running():
+            messagebox.showwarning(_T("局域网同步"), _T("请先启动局域网同步服务"))
+            return
+        self._busy = True
+        self._status(_T("正在检查差异…"))
+
+        def _prev():
+            try:
+                rep = self.app._sync_run_channel("lan", dry_run=True, mode=mode)
+            except Exception as e:                               # noqa: BLE001
+                rep = {"ok": False, "error": str(e)}
+            self.q.put({"kind": "lanpreview", "mode": mode, "report": rep})
+
+        threading.Thread(target=_prev, daemon=True).start()
+
+    def _on_lan_preview(self, mode, report):
+        if not report.get("ok"):
+            self._status(_T("检查失败：{e}").format(e=report.get("error") or ""))
+            return
+        pushed = int(report.get("pushed") or 0)
+        pulled = int(report.get("pulled") or 0)
+        imported = int(report.get("imported") or 0)
+        removed = int(report.get("removed") or 0)
+        deleted = int(report.get("deleted") or 0)
+        if not any((pushed, pulled, imported, removed, deleted)):
+            self._status(_T("没有需要同步的变化"))
+            return
+        parts = []
+        if mode == "push":
+            parts.append(_T("将上传本机改动 {p} 本").format(p=pushed))
+            if deleted:
+                parts.append(_T("将上传删除事件 {d} 个").format(d=deleted))
+        else:
+            parts.append(_T("将更新本机 {p} 本").format(p=pulled))
+            if imported:
+                parts.append(_T("将新增 {n} 本").format(n=imported))
+            if removed:
+                parts.append(_T("将移除 {n} 本").format(n=removed))
+        msg = "；".join(parts)
+        detail = "\n".join((report.get("lines") or [])[:10])
+        if detail:
+            msg += "\n\n" + detail
+        if not messagebox.askyesno(_T("局域网同步"), msg + "\n\n" + _T("继续？")):
+            self._status(_T("已取消"))
+            return
+        self._status(_T("正在同步…"))
+        self._busy = True
+        if not self.app._lan_merge_now(silent=False, on_done=lambda rep: self._on_lan_result(rep),
+                                       mode=mode):
+            self._busy = False
             self._status(_T("已有同步任务在进行中"))
 
     def _on_lan_result(self, report):
         self._busy = False
+        mode = report.get("mode") or "both"
         if report.get("ok"):
-            self._status(_T("局域网合并完成：上传 {p} 本，下载 {d} 本").format(
-                p=report.get("pushed", 0), d=report.get("pulled", 0)))
+            if mode == "push":
+                self._status(_T("已保存到云端：上传 {p} 本").format(p=report.get("pushed", 0)))
+            elif mode == "pull":
+                self._status(_T("已从云端读取：更新 {p} 本").format(p=report.get("pulled", 0)))
+            else:
+                self._status(_T("局域网合并完成：上传 {p} 本，下载 {d} 本").format(
+                    p=report.get("pushed", 0), d=report.get("pulled", 0)))
         else:
             self._status(_T("局域网合并失败：{e}").format(e=report.get("error") or ""))
 
@@ -821,7 +921,21 @@ class _SyncDlg:
             return
         self._busy = True
         self.btn_test.configure(state="disabled")
-        self.btn_sync.configure(state="disabled")
+        self.btn_push.configure(state="disabled")
+        self.btn_pull.configure(state="disabled")
+        if kind in ("push", "pull"):
+            mode = "push" if kind == "push" else "pull"
+            self._status(_T("正在检查差异…"))
+
+            def _prev():
+                try:
+                    rep = self.app._sync_run_channel("cloud", dry_run=True, mode=mode)
+                except Exception as e:                           # noqa: BLE001
+                    rep = {"ok": False, "error": str(e)}
+                self.q.put({"kind": "preview", "mode": mode, "report": rep})
+
+            threading.Thread(target=_prev, daemon=True).start()
+            return
         self._status(_T("正在连接…") if kind == "test" else _T("正在同步…"))
         engine = SyncEngine(self.app.storage, self.app.settings, log=self.q.put)
         if kind == "test":
@@ -859,17 +973,31 @@ class _SyncDlg:
                 if kind == "test":
                     self._busy = False
                     self.btn_test.configure(state="normal")
-                    self.btn_sync.configure(state="normal")
+                    self.btn_push.configure(state="normal")
+                    self.btn_pull.configure(state="normal")
                     if item.get("ok"):
                         self._status(item.get("msg") or _T("连接成功"))
                         self._log(item.get("msg") or "")
                     else:
                         self._status(_T("连接失败：{e}").format(e=item.get("msg")))
                         self._log(_T("连接失败：{e}").format(e=item.get("msg")))
+                elif kind == "lanpreview":
+                    self._busy = False
+                    self.btn_test.configure(state="normal")
+                    self.btn_push.configure(state="normal")
+                    self.btn_pull.configure(state="normal")
+                    self._on_lan_preview(item.get("mode") or "push", item.get("report") or {})
+                elif kind == "preview":
+                    self._busy = False
+                    self.btn_test.configure(state="normal")
+                    self.btn_push.configure(state="normal")
+                    self.btn_pull.configure(state="normal")
+                    self._on_preview(item.get("mode") or "push", item.get("report") or {})
                 elif kind == "sync":
                     self._busy = False
                     self.btn_test.configure(state="normal")
-                    self.btn_sync.configure(state="normal")
+                    self.btn_push.configure(state="normal")
+                    self.btn_pull.configure(state="normal")
                     for ln in item.get("lines") or []:
                         self._log(ln)
                     if item.get("ok"):
@@ -897,6 +1025,44 @@ class _SyncDlg:
             pass
         except Exception:
             pass
+
+    def _on_preview(self, mode, report):
+        """预览确认：先告诉用户按下按钮会发生什么，再真正写。"""
+        if not report.get("ok"):
+            self._status(_T("检查失败：{e}").format(e=report.get("error") or ""))
+            self._log(_T("检查失败：{e}").format(e=report.get("error") or ""))
+            return
+        pushed = int(report.get("pushed") or 0)
+        pulled = int(report.get("pulled") or 0)
+        imported = int(report.get("imported") or 0)
+        removed = int(report.get("removed") or 0)
+        deleted = int(report.get("deleted") or 0)
+        if not any((pushed, pulled, imported, removed, deleted)):
+            self._status(_T("没有需要同步的变化"))
+            return
+        parts = []
+        if mode == "push":
+            parts.append(_T("将上传本机改动 {p} 本").format(p=pushed))
+            if deleted:
+                parts.append(_T("将上传删除事件 {d} 个").format(d=deleted))
+        else:
+            parts.append(_T("将更新本机 {p} 本").format(p=pulled))
+            if imported:
+                parts.append(_T("将新增 {n} 本").format(n=imported))
+            if removed:
+                parts.append(_T("将移除 {n} 本（云端已删除）").format(n=removed))
+        msg = "；".join(parts)
+        detail = "\n".join((report.get("lines") or [])[:10])
+        if detail:
+            msg += "\n\n" + detail
+        if not messagebox.askyesno(_T("数据同步"), msg + "\n\n" + _T("继续？")):
+            self._status(_T("已取消"))
+            return
+        self._status(_T("正在同步…"))
+        self._busy = False
+        self.app._sync_run_channel("cloud", silent=False, mode=mode,
+                                   on_done=lambda rep: self.q.put(dict(rep, kind="sync")))
+        self._busy = True
 
     def _status(self, text):
         try:

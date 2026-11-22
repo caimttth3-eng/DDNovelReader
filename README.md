@@ -56,14 +56,14 @@
 
 在 [Releases](https://github.com/caimttth3-eng/DDNovelReader/releases) 页面下载对应平台的最新版，绿色免安装：
 
-- **Windows（单文件版）**：`DDNovelReader_v2.3.1_Windows.exe`，双击即可运行（自解压式，启动稍慢但便携，无需安装）
-- **Windows（onedir 版）**：`DDNovelReader_v2.3.1_Windows_onedir.zip`，解压后进入文件夹双击 `多多朗读.exe`（运行库随包存放，**启动秒开**，推荐低配 / 机械硬盘用户；zip 需解压后使用）
-- **macOS**：`DDNovelReader-macOS_v2.3.1.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
+- **Windows（单文件版）**：`DDNovelReader_v2.3.2_Windows.exe`，双击即可运行（自解压式，启动稍慢但便携，无需安装）
+- **Windows（onedir 版）**：`DDNovelReader_v2.3.2_Windows_onedir.zip`，解压后进入文件夹双击 `多多朗读.exe`（运行库随包存放，**启动秒开**，推荐低配 / 机械硬盘用户；zip 需解压后使用）
+- **macOS**：`DDNovelReader-macOS_v2.3.2.dmg`（推荐，拖入即装）或 `.zip`，安装步骤：
   1. **DMG**：双击挂载 → 把 `DDNovelReader.app` 拖入「应用程序」文件夹
   2. **ZIP**：双击解压得到 `DDNovelReader.app`，拖入「应用程序」文件夹
   3. 首次打开若提示「无法验证开发者」：右键 app → 打开 → 再次点击「打开」；或在 系统设置 → 隐私与安全性 中点「仍要打开」
   4. 若提示「已损坏，无法打开」：打开终端执行 `sudo xattr -dr com.apple.quarantine /Applications/DDNovelReader.app` 后重试
-- **Linux**：`DDNovelReader_v2.3.1_Linux.zip`，安装步骤：
+- **Linux**：`DDNovelReader_v2.3.2_Linux.zip`，安装步骤：
   1. 解压得到可执行文件后，在终端进入文件所在目录
   2. 加执行权限：`chmod +x DDNovelReader`
   3. 运行：`./DDNovelReader`
@@ -238,6 +238,15 @@ MIT License
   - 运行：python -m novelreader.main（数据目录自动使用用户主目录 ~/DDNovelReader）
 
 ## 版本历史
+
+### v2.3.2（2026-11-22）
+- 云端同步拆成两个按钮：「保存到云端」把本机的改动送上去，「从云端读取」把云端的更新拿下来，不再一个按钮两边一起动。
+- 书架底部和局域网区块用同一套名字：「保存到云端」只把本机改动送上去，「从云端读取」只把云端更新拿下来，按哪个方向就只走哪个方向。
+- 按按钮之前先弹一个确认框，写明这次会上传几条、下载几条、删除几条；点「否」就什么都不动。
+- 同步改成按项合并：读到第几页和书签各按自己的时间比新旧，另一台刚读到的新位置不会被这一台的旧位置盖掉。
+- 上传前先核对云端这一本有没有被别人改过；发现刚改过就重新读一遍再合并，两边的改动都留下。
+- 删除照旧两边同步：这边删了，那边下次同步跟着删；已经两边都删掉的书不会又冒出来。
+- 自动同步（每 10 分钟一次）仍是两边对一遍，用法跟以前一样。
 
 ### v2.3.1（2026-11-20）
 - 书本里的插图现在能看了：用 epub 格式的书，打开后封面和插图会显示在正文里。
