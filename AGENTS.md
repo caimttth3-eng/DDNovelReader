@@ -27,7 +27,7 @@
 - **更新说明四处载体一次改齐**：`novelreader/version_info.py` 的 `VERSION_HISTORY` 最新条目、`README.md` 版本历史、GitHub Release 说明、`ROADMAP.md`。改完必须跑 `.venv\Scripts\python.exe _check_notes_sync.py`，**PASS 才允许打包/发布**。
 - **更新说明写给普通用户看**：不出现 `content_key`、PROPFIND、schema、书签 id 这类内部术语，讲"用户得到什么"；且不得出现具体书名 / 章节名 / 疑似书名格式。
 - **五语言**：新增任何界面文案必须走 `_T()` 并补齐 简中 / 繁中 / 英 / 日 / 韩（繁体另补 `_ZH_TW`），漏一个语言就是欠账。
-- **三平台**：新增平台相关 API（打开文件夹、托盘、媒体键、路径）必须有 Windows / macOS / Linux 分支；路径只用 `os.path` / `pathlib`，不写死分隔符。
+- **三平台**：新增平台相关 API（打开文件夹、托盘、媒体键、路径）必须有 Windows / macOS / Linux 分支；路径只用 `os.path` / `pathlib`，不写死分隔符。**移动端（安卓 / iOS）是同一套 Flutter 工程**，涉及跨端契约时以 `安卓互通指南.md` 为准。
 - **发布**：严格按 `开发环境指南.md` 第 5b 节 13 步执行，不省步、不乱序；第 1 步先向用户确认三段式版本号（x.y.z）后才动代码。
 - **Tk 线程与性能红线**（坑 16）：主线程不 `join()` / `sleep()` 等后台线程；子线程只 `queue.put`，绝不直接碰 Tk；一次交互只写一次 `library.json`；启动路径上的重模块惰性导入。
 
@@ -41,7 +41,8 @@
 
 - 入口：`novelreader/main.py`；核心：`gui.py`（组装各 Mixin）、`reader_ui.py`（阅读区 / 朗读控制）、`tts_engine.py`（合成与播放）、`storage.py`（library.json）、`book_loader.py`（解析与分章）、`sync_engine.py` + `sync_ui.py`（WebDAV 同步）、`stats.py` + `stats_ui.py`（阅读统计）、`i18n.py`（五语言词典）。
 - 测试：`tests/` 下 `test_sync_engine_v2.py`、`test_cache_layout*.py`、`test_gui_cache_wiring.py`、`test_lan_server.py` / `test_lan_sync_flow.py` / `test_lan_migration.py` / `test_lan_gui_wiring.py`、`test_speech_word.py` / `test_word_highlight.py`（逐词高亮）、`test_rate_multiplier.py`（语速倍数）、`e2e_cross.py`（配 `mock_dav.py`）；跨平台验证走 `.github/workflows/verify-cross.yml`。
-- 安卓端是独立工程：`C:\Users\lyuga\Doubao\chats\2026-09-01\new-chat\duoduo_langdu`（Flutter，单独发布），跨端契约见 `安卓互通指南.md`。
+- 移动端是独立工程：`C:\Users\lyuga\Doubao\chats\2026-09-01\new-chat\duoduo_langdu`（Flutter，**安卓 + iOS 同一工程**，单独发布：APK 3 个 + iOS 未签名 IPA，由远端仓库 `ios-ipa.yml` 构建；当前 v1.3.4），跨端契约见 `安卓互通指南.md`（协议对安卓 / iOS 同样适用）。
+- 移动端仓库：`caimttth3-eng/DDNovelReader-Android`（仓库描述为 "IOS+安卓版"），iOS 安装与自签说明在 `docs/ios-install.md` / `docs/ios-selfsign.md`。
 - 文档：`开发环境指南.md`（环境与坑，权威）、`ROADMAP.md`（版本规划与待办）、`安卓端同步开发指南.md`、`PC端缓存共用改造指南.md`。
 
 ## 4. 卫生与安全
