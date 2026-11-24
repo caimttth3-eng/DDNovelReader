@@ -582,6 +582,8 @@ class ReaderMixin:
     def _page_reset(self):
         """换章/改字号/改分页模式时清空分页历史与底部遮罩。"""
         self._page_hist = []
+        self._page_rng = None
+        self._page_animating = False
         self._page_mask_hide()
 
     def _page_mask_hide(self):
@@ -618,12 +620,47 @@ class ReaderMixin:
         except Exception:
             self._page_mask = None
 
+    def _page_range(self):
+        """当前页可见区间 [top_off, end_off)（原文偏移，缓存）。
+
+        end_off 是页底遮罩行（被裁掉的半行）的起点；朗读推进到这个偏移之后才翻页，
+        页内读字一律不动视口。翻页、改字号、窗口变化后缓存作废重算。
+        """
+        rng = getattr(self, "_page_rng", None)
+        if rng is not None and rng[0] == self.chapter_idx:
+            return rng[1], rng[2]
+        return self._page_range_refresh()
+
+    def _page_range_refresh(self):
+        try:
+            top = int(self.char_offset)
+        except Exception:
+            top = 0
+        end = None
+        try:
+            peek, nxt = paging.page_bounds(self.text)
+            cut = peek or nxt
+            if cut:
+                end = self._offset_at_index(cut)
+        except Exception:
+            end = None
+        if end is None:
+            try:
+                end = len(self.book.chapters[self.chapter_idx].content)
+            except Exception:
+                end = top
+        end = max(top, int(end))
+        self._page_rng = (self.chapter_idx, top, end)
+        return top, end
+
     def _page_settle_top(self, save=True):
         """把「当前视口顶部」认定为新页首：同步偏移、历史与遮罩。"""
         off = self._current_offset()
         self.char_offset = off
         self._page_hist = [off]
+        self._page_rng = None
         self._page_mask_show()
+        self._page_range_refresh()
         if save:
             self._schedule_status_update()
             self._schedule_save()
@@ -646,7 +683,9 @@ class ReaderMixin:
             self._page_hist = [actual]
         elif self._page_hist[-1] != actual:
             self._page_hist.append(actual)
+        self._page_rng = None
         self._page_mask_show()
+        self._page_range_refresh()
         if update:
             self._update_status()
             self._schedule_save()
@@ -660,6 +699,7 @@ class ReaderMixin:
         except Exception:
             pass
         self._page_settle_top(save=False)
+        self._page_range_refresh()
         self._update_status()
         self._schedule_save()
 
@@ -674,7 +714,9 @@ class ReaderMixin:
         if not hist or hist[-1] != actual:
             hist.append(actual)
         self._page_hist = hist
+        self._page_rng = None
         self._page_mask_show()
+        self._page_range_refresh()
         self._update_status()
         self._schedule_save()
 
@@ -710,11 +752,22 @@ class ReaderMixin:
         self._page_turn(direction)
         return "break"
 
-    def _page_animate_to(self, idx):
+    def _page_animate_to(self, idx, done_cb=None):
         """翻到 idx 所在页；按设置选择无动画 / 滑动 / 覆盖。"""
+
+        def _finish():
+            self._page_animating = False
+            self._page_settle_index(idx)
+            if done_cb is not None:
+                try:
+                    done_cb()
+                except Exception:
+                    pass
+
+        self._page_animating = True
         mode = self._page_mode()
         if mode == "page":
-            self._page_settle_index(idx)
+            _finish()
             return
         try:
             old_f = paging.yview_fraction(self.text)
@@ -724,18 +777,66 @@ class ReaderMixin:
             self.text.yview_moveto(old_f)
             self.text.update_idletasks()
             if abs(target_f - old_f) < 1e-6:
-                self._page_settle_index(idx)
+                _finish()
                 return
             if mode == "slide":
                 paging.animate_fraction(
                     self.root, self.text, old_f, target_f, frames=8, interval=16,
-                    done=lambda: self._page_settle_index(idx))
+                    done=_finish)
             else:
-                self._page_cover(idx)
+                self._page_cover(idx, done_cb=_finish)
         except Exception:
-            self._page_settle_index(idx)
+            _finish()
 
-    def _page_cover(self, idx):
+    def _page_follow_highlight(self):
+        """朗读推进：按当前高亮位置决定是否需要翻页。"""
+        if getattr(self, "_page_animating", False):
+            try:
+                self.root.after(220, self._page_follow_highlight)
+            except Exception:
+                pass
+            return
+        off = getattr(self, "_hl_offset", None)
+        hi = getattr(self, "_highlight_index", None)
+        if off is None or not hi:
+            return
+        self._page_follow_offset(hi[0], off)
+
+    def _page_follow_offset(self, ci, off, depth=0):
+        """朗读越页时整页翻，而不是把句子滚到窗口顶部。
+
+        - 句首仍在本页可见区间内：一动不动（页内读字不滚屏）。
+        - 句首落在页底被遮住的那半行或更后面：按设置的动画翻到下一页。
+        - 句首在上方（用户回翻后朗读追上来）：翻回上一页。
+        翻完之后再检查一次，跨多页的跳句也能补齐。
+        """
+        if not self._page_active() or not self.book:
+            return
+        if ci != self.chapter_idx or depth > 4:
+            return
+        try:
+            off = int(off)
+        except Exception:
+            return
+        top, end = self._page_range()
+        if top <= off < end:
+            return
+        if off < top:
+            hist = getattr(self, "_page_hist", None) or []
+            if len(hist) >= 2 and self.chapter_idx == ci:
+                self._page_turn(-1)
+                self.root.after(180, lambda: self._page_follow_offset(ci, off, depth + 1))
+            return
+        try:
+            _peek, nxt = paging.page_bounds(self.text)
+        except Exception:
+            nxt = None
+        if nxt is None:
+            return
+        self._page_animate_to(
+            nxt, done_cb=lambda: self._page_follow_offset(ci, off, depth + 1))
+
+    def _page_cover(self, idx, done_cb=None):
         """覆盖：正文底色的整页「纸」从下往上盖住当前页，落到新页后再抽走。"""
         self._page_mask_hide()
         try:
@@ -783,6 +884,11 @@ class ReaderMixin:
                     except Exception:
                         pass
                     self._page_mask_show()
+                    if done_cb is not None:
+                        try:
+                            done_cb()
+                        except Exception:
+                            pass
 
             self.root.after(16, cover_step)
         except Exception:
@@ -1281,6 +1387,7 @@ class ReaderMixin:
         self.text.tag_remove("tts", "1.0", "end")
         self.text.tag_add("tts", anchor, end)
         self._highlight_index = (ci, anchor)
+        self._hl_offset = int(off)
         # 逐词高亮上下文：句子在显示文本里的起点 + 该句显示文本 + 朗读（清洗）文本
         disp = ""
         try:
@@ -1290,23 +1397,21 @@ class ReaderMixin:
         self._word_ctx = {"ci": ci, "start": anchor, "clean": textconv.convert(text or "", self._text_convert_mode()),
                           "display": disp, "map": None}
         self._start_word_tick()
-        self._pin_highlight_top(anchor)
+        if self._page_active():
+            # 分页模式：页内不滚屏；句子越页才整页翻（见 _page_follow_offset）
+            self._page_follow_offset(ci, off)
+        else:
+            self._pin_highlight_top(anchor)
     def _pin_highlight_top(self, start):
         """把高亮所在显示行钉到窗口第一行（兼容所有空行模式）。
 
         统一用「先 see 保证可见 → dlineinfo 测该行像素偏移 → yview fraction 换算
         滚动量」，把高亮所在显示行钉到窗口第一行。
-        分页模式下例外：句子已完整落在当前页内就不动，避免每读一句就跳一页。
+        分页模式下完全不走滚屏：页内读字视口不动，句子越页由 _page_follow_offset
+        整页翻过去（翻页动画按设置生效），避免听起来还是「一句一句往上滚」。
         """
         if self._page_active():
-            try:
-                d = self.text.dlineinfo(start)
-                pady = int(float(self.text.cget("pady")))
-                h = self.text.winfo_height()
-                if d and d[1] >= pady - 1 and d[1] + d[3] <= h - pady + 1:
-                    return
-            except Exception:
-                pass
+            return
         try:
             self.text.see(start)
             self.text.update_idletasks()
@@ -1334,19 +1439,21 @@ class ReaderMixin:
                 self.text.see(start)
             except Exception:
                 pass
-        finally:
-            if self._page_active():
-                # 翻到句子起点所在页，并把该页首作为新的分页起点
-                self._page_settle_top()
+
     def _repin_reading(self):
-        """朗读中窗口/字号变化后，重新把当前高亮钉回窗口第一行。"""
+        """朗读中窗口/字号变化后重新对齐视口（分页模式保页首，滚动模式钉高亮）。"""
         if not self.book or not self.tts.is_playing():
+            return
+        if self._page_active():
+            self._page_show_offset(self.char_offset, reset=False, update=False)
+            self._page_follow_highlight()
             return
         hi = getattr(self, "_highlight_index", None)
         if hi and hi[0] == self.chapter_idx and hi[1]:
             self._pin_highlight_top(hi[1])
     def _clear_highlight(self):
         self._highlight_index = None
+        self._hl_offset = None
         self._resize_timer = None
         self._pending_seek_pct = None
         self._status_scroll_timer = None
@@ -1428,9 +1535,30 @@ class ReaderMixin:
                         start = ctx["start"]
                         self.text.tag_add("tts_word",
                                           "%s+%dc" % (start, ds), "%s+%dc" % (start, de))
+                        self._page_word_check("%s+%dc" % (start, ds))
             self._word_after = self.root.after(60, self._word_tick)
         except Exception:
             self._word_after = None
+
+    def _page_word_check(self, idx):
+        """分页朗读：正在读的词落到页底被遮住的那一行时，整页翻过去。
+
+        句子开头还在页内、但词已经读到页外的情况（长句跨页）靠这里补齐，
+        与 Legado 的「读到页底就翻页」一致；翻页期间不重复触发。
+        """
+        if not self._page_active() or getattr(self, "_page_animating", False):
+            return
+        try:
+            cut = paging.first_cut_line(self.text)
+            if not cut:
+                return
+            wline = self.text.index("%s display linestart" % idx)
+            if self.text.compare(wline, ">=", cut):
+                _peek, nxt = paging.page_bounds(self.text)
+                if nxt is not None:
+                    self._page_animate_to(nxt)
+        except Exception:
+            pass
 
     def _toggle_word_highlight(self):
         """设置面板：逐词高亮 开 / 关（即时生效）。"""

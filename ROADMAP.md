@@ -12,7 +12,7 @@
 - [x] **视口分页（不重排正文）**：新增 `novelreader/paging.py`；页边界按当前字号 / 行距 / 窗口高度实测显示行，正文、`_line_map`、插图位置、进度口径（`char_offset`=页首偏移）全不动；每页从完整显示行开始，页底被裁的半行用同底色 Canvas 遮住（页首即超高图时不遮）
 - [x] **四档读法**：设置 `page_mode`（`scroll` / `page` 无动画 / `slide` 滑动 / `cover` 覆盖）；切档、换字号、换行距、窗口变化后实时重算并保持当前原文位置
 - [x] **翻页入口**：滚轮、PageUp / PageDown、点击屏幕左/右 1/3（`page_tap_turn` 可关）；章末自动进下一章首页、章首回翻进上一章末页；**空格已被朗读开关占用，未用于翻页**（与原方案差异，已记入交付说明）
-- [x] **朗读联动**：句子已完整落在本页就不动，只在句子跑出页外时整页翻到句首（`_pin_highlight_top` 增分页早退 + `_page_settle_top`）
+- [x] **朗读联动**：页内读字视口完全不动；读到页底（含长句读到一半的逐词位置）或句首直接落到后页时，按所设动画整页翻过去（`_page_follow_offset` / `_page_word_check` / `_page_range` 缓存），不再把句子滚到窗口顶部
 - [x] **简繁转换（显示层 1:1）**：新增 `tools/gen_textconv_data.py`、`novelreader/textconv_data.py`（3980/4113 单字 + 9825 s2t 词组 + 258 t2s 词组）、`novelreader/textconv.py`（首字分桶 + 最长匹配 + 长度校验）；纯 Python，不依赖 opencc
 - [x] **显示层口径**：转换只作用于正文渲染与复制，TTS 仍读原文（音频缓存 `content_id/voice/rate` 路径不变）；逐词高亮把 TTS 回吐的 clean 文本按同一模式转换后再对齐；设置 `text_convert`（`none` / `s2t` / `t2s`）即时生效，不动缓存版本
 - [x] **界面**：工具栏第 2b 行「阅读 / 翻页 / 简繁 / 点击翻页」；五语言文案补齐；`storage.DEFAULT_SETTINGS` 加三项默认值
