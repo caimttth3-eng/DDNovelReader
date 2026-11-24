@@ -716,12 +716,12 @@ class NovelReaderBase:
         self.text.tag_configure("tts_word", background="#9BC5DD", foreground="#000000")
         self.text.tag_configure("bm", background="#C8E6C9", foreground="#000000")
 
-        self.text.bind("<MouseWheel>", self._on_scroll)
+        self.text.bind("<MouseWheel>", self._on_wheel)
         self.text.bind("<ButtonRelease-1>", self._on_scroll)
         self.text.bind("<KeyRelease>", self._on_scroll)
         self.text.bind("<Configure>", self._on_text_resize)
-        self.text.bind("<Button-4>", self._on_scroll)   # 部分滚轮
-        self.text.bind("<Button-5>", self._on_scroll)
+        self.text.bind("<Button-4>", self._on_wheel)   # 部分滚轮
+        self.text.bind("<Button-5>", self._on_wheel)
         self.text.bind("<Button-3>", self._popup_text_menu)
 
         # 阅读区右键菜单
@@ -888,6 +888,35 @@ class NovelReaderBase:
         self.theme_cb.bind("<<ComboboxSelected>>", self._on_theme_change)
         ttk.Button(row2, text=_T("🔍 搜索"), command=self._open_search_dialog).pack(side="left", padx=(8, 0))
 
+        # ---- 第 2b 行：阅读模式（分页 / 正文简繁）----
+        row2b = tk.Frame(bar)
+        row2b.pack(fill="x", pady=1)
+        _lbl(row2b, _T("阅读"), fg="#999999")
+        ttk.Separator(row2b, orient="vertical").pack(side="left", fill="y", padx=6)
+
+        _lbl(row2b, _T("翻页"))
+        self.page_cb = ttk.Combobox(
+            row2b, state="readonly", width=12,
+            values=[_T("滚动"), _T("翻页-无动画"), _T("翻页-滑动"), _T("翻页-覆盖")],
+        )
+        self.page_cb.pack(side="left", padx=(2, 8))
+        self.page_cb.bind("<<ComboboxSelected>>", self._on_page_mode_change)
+
+        _lbl(row2b, _T("简繁"))
+        self.convert_cb = ttk.Combobox(
+            row2b, state="readonly", width=12,
+            values=[_T("不转换"), _T("简体→繁体"), _T("繁体→简体")],
+        )
+        self.convert_cb.pack(side="left", padx=(2, 8))
+        self.convert_cb.bind("<<ComboboxSelected>>", self._on_text_convert_change)
+
+        self.tap_turn_var = tk.BooleanVar(value=bool(self.settings.get("page_tap_turn", True)))
+        self.tap_turn_chk = tk.Checkbutton(
+            row2b, text=_T("点击翻页"), variable=self.tap_turn_var,
+            command=self._on_tap_turn_toggle, font=("微软雅黑", 9),
+        )
+        self.tap_turn_chk.pack(side="left", padx=(0, 6))
+
         # ---- 第 3 行：朗读控制 ----
         row3 = tk.Frame(bar)
         row3.pack(fill="x", pady=(1, 3))
@@ -976,6 +1005,17 @@ class NovelReaderBase:
         pm = int(self.settings.get("paragraph_mode", 1))
         if 1 <= pm <= 3:
             self.paragraph_cb.current(pm - 1)
+        # 分页模式 / 正文简繁 / 点击翻页
+        try:
+            page_keys = ("scroll", "page", "slide", "cover")
+            pmode = str(self.settings.get("page_mode", "scroll") or "scroll")
+            self.page_cb.current(page_keys.index(pmode) if pmode in page_keys else 0)
+            conv_keys = ("none", "s2t", "t2s")
+            cmode = str(self.settings.get("text_convert", "none") or "none")
+            self.convert_cb.current(conv_keys.index(cmode) if cmode in conv_keys else 0)
+            self.tap_turn_var.set(bool(self.settings.get("page_tap_turn", True)))
+        except Exception:
+            pass
         voice = self.settings.get("tts_voice")
         voices = list(self.voice_cb["values"])
         idx = -1
@@ -1091,6 +1131,11 @@ class NovelReaderBase:
         )
         self._tag_body()
         self._repin_reading()
+        # 分页模式：字号/行距/字体变化会改变每页能放多少显示行，必须重算页边界
+        try:
+            self._page_after_font()
+        except Exception:
+            pass
     def _apply_paragraph_mode(self, content):
         """压缩空行：1 不压缩（每段一行）/ 2 合并为一行（段间一个空行）/ 3 清理所有行（全文一行）。"""
         mode = int(self.settings.get("paragraph_mode", 1))

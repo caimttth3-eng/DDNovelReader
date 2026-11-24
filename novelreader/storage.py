@@ -180,6 +180,9 @@ DEFAULT_SETTINGS = {
     "tts_voice": "",
     "window_geometry": "",
     "paragraph_mode": 1,       # 压缩空行：1 不压缩 / 2 合并为一行 / 3 清理所有行
+    "page_mode": "scroll",     # 翻页：scroll 滚动 / page 翻页无动画 / slide 滑动 / cover 覆盖
+    "page_tap_turn": True,     # 分页模式下点击屏幕左/右 1/3 翻页
+    "text_convert": "none",    # 正文简繁：none / s2t 简→繁 / t2s 繁→简（严格 1:1 保长）
     "first_line_indent": True, # 段落首行缩进二个字
     "tts_sentence_gap": 0.10,  # 句子停顿间隔（秒）
     "tts_cache_dir": "",       # 自定义整本语音缓存根目录（空=默认 %APPDATA%\\DDNovelReader\\tts_cache）

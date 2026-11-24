@@ -135,6 +135,35 @@ class ThemeMixin:
             self.theme_cb.set(_T(theme))
         except Exception:
             pass
+    def _on_page_mode_change(self, event=None):
+        """分页模式：滚动 / 翻页-无动画 / 翻页-滑动 / 翻页-覆盖（即时生效）。"""
+        keys = ("scroll", "page", "slide", "cover")
+        idx = self.page_cb.current()
+        if idx < 0 or idx >= len(keys):
+            return
+        mode = keys[idx]
+        self.settings["page_mode"] = mode
+        self.storage.set_setting("page_mode", mode)
+        self._page_mode_changed()
+
+    def _on_text_convert_change(self, event=None):
+        """正文简繁：不转换 / 简体→繁体 / 繁体→简体（显示层 1:1 转换，即时生效）。"""
+        keys = ("none", "s2t", "t2s")
+        idx = self.convert_cb.current()
+        if idx < 0 or idx >= len(keys):
+            return
+        mode = keys[idx]
+        self.settings["text_convert"] = mode
+        self.storage.set_setting("text_convert", mode)
+        if self.book:
+            self._render_chapter()
+
+    def _on_tap_turn_toggle(self):
+        """分页模式下点屏幕左/右 1/3 翻页：开 / 关。"""
+        val = bool(self.tap_turn_var.get())
+        self.settings["page_tap_turn"] = val
+        self.storage.set_setting("page_tap_turn", val)
+
     def _cycle_paragraph_mode(self):
         """循环切换空行压缩模式：不压缩→合并为一行→清理所有行→不压缩。"""
         try:

@@ -76,6 +76,9 @@ class ShortcutsMixin:
         r.bind("<Control-L>", lambda e: self._toggle_toc())
         r.bind("<Control-Prior>", lambda e: self._goto_chapter(self.chapter_idx - 1))
         r.bind("<Control-Next>", lambda e: self._goto_chapter(self.chapter_idx + 1))
+        # PageUp / PageDown：分页模式整页翻（滚动模式下仍是默认滚动）
+        r.bind("<Prior>", lambda e: self._page_key(-1))
+        r.bind("<Next>", lambda e: self._page_key(1))
         r.bind("<F11>", lambda e: self._toggle_fullscreen())
         r.bind("<Alt-Return>", lambda e: self._toggle_fullscreen())
         r.bind("<Escape>", lambda e: self._exit_fullscreen())

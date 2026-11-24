@@ -12,7 +12,7 @@ import webbrowser
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, book_loader
+from . import __version__, book_loader, paging, textconv
 from .storage import (
     Storage,
     cache_dir,
@@ -196,6 +196,8 @@ class ReaderMixin:
     def _render_chapter(self):
         if not self.book:
             return
+        self._rendering = True
+        self._page_reset()
         ch = self.book.chapters[self.chapter_idx]
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
@@ -208,19 +210,26 @@ class ReaderMixin:
         # （标题已 strip 过，不含换行；Tk 的 end/end-1c 在文末换行上会多算一行，不可用）
         self._body_start_line = 3
         # 插入正文（含插图：按 anchor 分段插入，全程只往 end 追加，避免索引漂移）
-        disp = self._apply_paragraph_mode(ch.content)
+        # 简繁转换在显示层做（1:1 保长，偏移与原文完全一致）
+        disp = self._apply_paragraph_mode(self._display_content(ch.content))
         self._disp_text = disp
         self._insert_body_with_art(ch, disp)
         self.text.configure(state="disabled")
         self._apply_font()
         self._tag_body()
-        self._scroll_to_offset(self.char_offset)
+        if self._page_active():
+            # 分页模式：按当前位置所在页对齐（页首必须落在完整显示行上）
+            self._page_show_offset(self.char_offset, reset=True, update=False)
+        else:
+            self._scroll_to_offset(self.char_offset)
         # 轻量同步目录选中态/下拉框（不重建整个列表，避免大目录每次重建）
         self._sync_chapter_sel()
         self._update_status()
         self._repin_reading()
         # 渲染本书书签高亮（划线标注）
         self._apply_bookmark_tags()
+        self._rendering = False
+
     def _insert_body_with_art(self, ch, disp):
         """把显示文本按插图锚点分段插入，插图独占一行。
 
@@ -335,11 +344,11 @@ class ReaderMixin:
         try:
             idx = self.text.index("@%d,%d" % (event.x, event.y))
         except Exception:
-            return
+            idx = ""
         try:
             names = self.text.image_names()
         except Exception:
-            return
+            names = []
         src = getattr(self, "_art_src", None) or {}
         for name in names:
             try:
@@ -352,6 +361,8 @@ class ReaderMixin:
                 return
             except Exception:
                 continue
+        # 没点到插图：分页模式下按左右 1/3 热区翻页
+        self._on_page_zone_click(event)
     def _open_art_preview(self, path):
         """插图预览窗：默认按屏幕大小适配，滚轮缩放，Esc/单击关闭，双击复位。"""
         import tkinter as tk
@@ -448,6 +459,7 @@ class ReaderMixin:
         self._reprocess_book(info["path"], self.current_bid)
 
     def _render_empty(self):
+        self._page_reset()
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.configure(state="disabled")
@@ -512,9 +524,18 @@ class ReaderMixin:
     def _on_scroll(self, event=None):
         if not self.book:
             return
-        self.char_offset = self._current_offset()
+        if self._page_active():
+            # 分页模式下任何滚动（滚轮之外的拖拽/键盘/窗口变化）都重新对齐到完整显示行
+            try:
+                paging.snap_index_to_top(self.text, paging.page_top_index(self.text))
+            except Exception:
+                pass
+            self._page_settle_top(save=False)
+        else:
+            self.char_offset = self._current_offset()
         self._schedule_status_update()
         self._schedule_save()
+
     def _schedule_status_update(self):
         """滚动高频时合并状态栏刷新（进度百分比/章节位置），避免每帧重复配置标签。"""
         t = getattr(self, "_status_scroll_timer", None)
@@ -543,18 +564,292 @@ class ReaderMixin:
             self._on_scroll(event)
         except Exception:
             pass
-    def _current_offset(self):
-        """视口顶部对应的原文字符偏移（按渲染时建立的行映射反算，不依赖 Tk 字符计数）。"""
+    # ---------------- 分页 / 翻页模式（视口分页，不重排正文） ----------------
+    def _page_mode(self):
+        mode = str(self.settings.get("page_mode", "scroll") or "scroll")
+        return mode if mode in ("scroll", "page", "slide", "cover") else "scroll"
+
+    def _page_active(self):
+        return bool(self.book) and self._page_mode() != "scroll"
+
+    def _text_convert_mode(self):
+        return textconv.normalize_mode(str(self.settings.get("text_convert", "none") or "none"))
+
+    def _display_content(self, content):
+        """显示层正文：按设置做简繁转换（严格 1:1 保长，偏移不变）。"""
+        return textconv.convert(content, self._text_convert_mode())
+
+    def _page_reset(self):
+        """换章/改字号/改分页模式时清空分页历史与底部遮罩。"""
+        self._page_hist = []
+        self._page_mask_hide()
+
+    def _page_mask_hide(self):
+        cv = getattr(self, "_page_mask", None)
+        self._page_mask = None
+        if cv is not None:
+            try:
+                cv.destroy()
+            except Exception:
+                pass
+
+    def _page_mask_show(self):
+        """把页底被裁掉的那半行用正文底色遮住（保证每页结尾也是完整显示行）。"""
+        self._page_mask_hide()
+        if not self._page_active():
+            return
         try:
-            line = int(self.text.index("@0,0").split(".")[0])
-            col = int(self.text.index("@0,0").split(".")[1])
+            peek = paging.first_cut_line(self.text)
+            if not peek:
+                return
+            d = self.text.dlineinfo(peek)
+            if not d:
+                return
+            y = int(d[1])
+            h = self.text.winfo_height()
+            pady = int(float(self.text.cget("pady")))
+            if y <= pady + 2 or y >= h - 1:
+                return  # 页首就是超高图（放不进一页）：不遮挡，避免整页空白
+            cv = tk.Canvas(self.text, bg=self.text.cget("background"),
+                           highlightthickness=0, bd=0, cursor="")
+            cv.place(x=0, y=y, relwidth=1, height=max(1, h - y))
+            cv.bind("<Button-1>", lambda e: self._on_page_zone_click(e))
+            self._page_mask = cv
+        except Exception:
+            self._page_mask = None
+
+    def _page_settle_top(self, save=True):
+        """把「当前视口顶部」认定为新页首：同步偏移、历史与遮罩。"""
+        off = self._current_offset()
+        self.char_offset = off
+        self._page_hist = [off]
+        self._page_mask_show()
+        if save:
+            self._schedule_status_update()
+            self._schedule_save()
+
+    def _page_show_offset(self, offset, reset=False, update=True):
+        """把 offset 所在页显示出来（分页模式的正确定位入口）。"""
+        if not self.book or not self._page_active():
+            return
+        ch = self.book.chapters[self.chapter_idx]
+        offset = max(0, min(int(offset), len(ch.content)))
+        line, col = self._transformed_pos(ch.content, offset)
+        idx = "%d.%d" % (line, col)
+        try:
+            paging.snap_index_to_top(self.text, idx)
+        except Exception:
+            pass
+        actual = self._current_offset()
+        self.char_offset = actual
+        if reset or not getattr(self, "_page_hist", None):
+            self._page_hist = [actual]
+        elif self._page_hist[-1] != actual:
+            self._page_hist.append(actual)
+        self._page_mask_show()
+        if update:
+            self._update_status()
+            self._schedule_save()
+
+    def _page_show_last(self):
+        """定位到本章最后一页（往回翻进入上一章时用）。"""
+        try:
+            self.text.yview_moveto(1.0)
+            self.text.update_idletasks()
+            paging.snap_index_to_top(self.text, paging.page_top_index(self.text))
+        except Exception:
+            pass
+        self._page_settle_top(save=False)
+        self._update_status()
+        self._schedule_save()
+
+    def _page_settle_index(self, idx):
+        try:
+            paging.snap_index_to_top(self.text, idx)
+        except Exception:
+            pass
+        actual = self._current_offset()
+        self.char_offset = actual
+        hist = getattr(self, "_page_hist", None) or []
+        if not hist or hist[-1] != actual:
+            hist.append(actual)
+        self._page_hist = hist
+        self._page_mask_show()
+        self._update_status()
+        self._schedule_save()
+
+    def _page_turn(self, direction):
+        """direction=1 下一页 / -1 上一页。"""
+        if not self._page_active():
+            return
+        if direction > 0:
+            _peek, nxt = paging.page_bounds(self.text)
+            if nxt is None:
+                # 章末：自动进下一章首页
+                if self.chapter_idx + 1 < len(self.book.chapters):
+                    self._goto_chapter(self.chapter_idx + 1, 0)
+                return
+            self._page_animate_to(nxt)
+        else:
+            hist = getattr(self, "_page_hist", None) or []
+            if len(hist) >= 2:
+                hist.pop()
+                self._page_show_offset(hist[-1])
+                return
+            if self.chapter_idx > 0:
+                self.chapter_idx -= 1
+                self.char_offset = max(0, len(self.book.chapters[self.chapter_idx].content) - 1)
+                self._render_chapter()
+                self._page_show_last()
+            return
+
+    def _page_key(self, direction):
+        """PageUp / PageDown：分页模式整页翻，滚动模式下交回 Tk 默认滚动。"""
+        if not self._page_active():
+            return None
+        self._page_turn(direction)
+        return "break"
+
+    def _page_animate_to(self, idx):
+        """翻到 idx 所在页；按设置选择无动画 / 滑动 / 覆盖。"""
+        mode = self._page_mode()
+        if mode == "page":
+            self._page_settle_index(idx)
+            return
+        try:
+            old_f = paging.yview_fraction(self.text)
+            self.text.see(idx)
+            self.text.update_idletasks()
+            target_f = paging.yview_fraction(self.text)
+            self.text.yview_moveto(old_f)
+            self.text.update_idletasks()
+            if abs(target_f - old_f) < 1e-6:
+                self._page_settle_index(idx)
+                return
+            if mode == "slide":
+                paging.animate_fraction(
+                    self.root, self.text, old_f, target_f, frames=8, interval=16,
+                    done=lambda: self._page_settle_index(idx))
+            else:
+                self._page_cover(idx)
+        except Exception:
+            self._page_settle_index(idx)
+
+    def _page_cover(self, idx):
+        """覆盖：正文底色的整页「纸」从下往上盖住当前页，落到新页后再抽走。"""
+        self._page_mask_hide()
+        try:
+            h = max(1, self.text.winfo_height())
+            cv = tk.Canvas(self.text, bg=self.text.cget("background"),
+                           highlightthickness=0, bd=0)
+            cv.place(x=0, y=h, relwidth=1, height=h)
+            try:
+                cv.create_line(0, 1, self.text.winfo_width(), 1, fill="#bdbdbd")
+            except Exception:
+                pass
+            state = {"i": 0, "phase": 0}
+
+            def cover_step():
+                state["i"] += 1
+                k = state["i"] / 6.0
+                y = int(h * (1 - k))
+                try:
+                    cv.place_configure(y=y)
+                except Exception:
+                    pass
+                if state["i"] < 6:
+                    self.root.after(16, cover_step)
+                else:
+                    try:
+                        paging.snap_index_to_top(self.text, idx)
+                    except Exception:
+                        pass
+                    self._page_settle_index(idx)
+                    state["i"] = 0
+                    self.root.after(20, reveal_step)
+
+            def reveal_step():
+                state["i"] += 1
+                k = state["i"] / 6.0
+                try:
+                    cv.place_configure(y=int(-h * k))
+                except Exception:
+                    pass
+                if state["i"] < 6:
+                    self.root.after(16, reveal_step)
+                else:
+                    try:
+                        cv.destroy()
+                    except Exception:
+                        pass
+                    self._page_mask_show()
+
+            self.root.after(16, cover_step)
+        except Exception:
+            self._page_settle_index(idx)
+
+    def _on_wheel(self, event=None):
+        """滚轮：分页模式整页翻，滚动模式保持原行为。"""
+        if self._page_active():
+            delta = 0
+            try:
+                delta = int(getattr(event, "delta", 0) or 0)
+            except Exception:
+                delta = 0
+            if not delta:
+                delta = 1 if int(getattr(event, "num", 0) or 0) == 4 else -1
+            self._page_turn(-1 if delta > 0 else 1)
+            return "break"
+        return self._on_scroll(event)
+
+    def _page_tap_turn_enabled(self):
+        try:
+            return bool(self.settings.get("page_tap_turn", True))
+        except Exception:
+            return True
+
+    def _on_page_zone_click(self, event=None):
+        """点击屏幕左右 1/3 翻页（设置可关）。返回是否翻页。"""
+        if not self._page_active() or not self._page_tap_turn_enabled():
+            return False
+        try:
+            w = self.text.winfo_width()
+            x = int(event.x)
+        except Exception:
+            return False
+        if w <= 0:
+            return False
+        if x < w / 3.0:
+            self._page_turn(-1)
+            return True
+        if x > w * 2.0 / 3.0:
+            self._page_turn(1)
+            return True
+        return False
+
+    def _page_mode_changed(self):
+        """切换分页模式后立即生效（重新渲染并保持当前位置）。"""
+        if self.book:
+            self._render_chapter()
+        else:
+            self._page_reset()
+
+    def _page_after_font(self):
+        """字号/行距变化后重算页边界（分页模式下保持当前原文位置）。"""
+        if getattr(self, "_rendering", False) or not self._page_active() or not self.book:
+            return
+        self._page_show_offset(self._current_offset(), reset=True, update=False)
+
+    def _offset_at_index(self, idx):
+        """给定 Tk 索引 → 原文字符偏移（与 _current_offset 同一套行映射口径）。"""
+        try:
+            line, col = [int(x) for x in str(idx).split(".")]
         except Exception:
             return 0
         lmap = getattr(self, "_line_map", None)
         if not lmap:
             return max(0, getattr(self, "char_offset", 0))
         ch = self.book.chapters[self.chapter_idx]
-        # 行映射按行号升序，取最后一条 line <= 当前行的记录
         best = None
         for ent in lmap:
             if ent[0] <= line:
@@ -564,9 +859,17 @@ class ReaderMixin:
         if best is None:
             return 0
         if best[3]:
-            # 插图行：位置即该插图的原文锚点
             return max(0, min(len(ch.content), best[2]))
         return max(0, min(len(ch.content), best[2] + col))
+
+    def _current_offset(self):
+        """视口顶部对应的原文字符偏移（按渲染时建立的行映射反算，不依赖 Tk 字符计数）。"""
+        try:
+            idx = self.text.index("@0,0")
+        except Exception:
+            return 0
+        return self._offset_at_index(idx)
+
     def _content_to_disp_index(self, off, content, disp=None):
         """原文偏移 → 显示文本偏移（按空行模式换算，不含插图占位）。"""
         if disp is None:
@@ -984,7 +1287,7 @@ class ReaderMixin:
             disp = self.text.get(anchor, end)
         except Exception:
             disp = ""
-        self._word_ctx = {"ci": ci, "start": anchor, "clean": text or "",
+        self._word_ctx = {"ci": ci, "start": anchor, "clean": textconv.convert(text or "", self._text_convert_mode()),
                           "display": disp, "map": None}
         self._start_word_tick()
         self._pin_highlight_top(anchor)
@@ -993,7 +1296,17 @@ class ReaderMixin:
 
         统一用「先 see 保证可见 → dlineinfo 测该行像素偏移 → yview fraction 换算
         滚动量」，把高亮所在显示行钉到窗口第一行。
+        分页模式下例外：句子已完整落在当前页内就不动，避免每读一句就跳一页。
         """
+        if self._page_active():
+            try:
+                d = self.text.dlineinfo(start)
+                pady = int(float(self.text.cget("pady")))
+                h = self.text.winfo_height()
+                if d and d[1] >= pady - 1 and d[1] + d[3] <= h - pady + 1:
+                    return
+            except Exception:
+                pass
         try:
             self.text.see(start)
             self.text.update_idletasks()
@@ -1021,6 +1334,10 @@ class ReaderMixin:
                 self.text.see(start)
             except Exception:
                 pass
+        finally:
+            if self._page_active():
+                # 翻到句子起点所在页，并把该页首作为新的分页起点
+                self._page_settle_top()
     def _repin_reading(self):
         """朗读中窗口/字号变化后，重新把当前高亮钉回窗口第一行。"""
         if not self.book or not self.tts.is_playing():

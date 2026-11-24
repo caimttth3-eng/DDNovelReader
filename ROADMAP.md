@@ -5,6 +5,19 @@
 
 ## 已实装（勾选留档）
 
+### v2.3.3（2026-11-24 归档）：视口分页四档 + 正文简繁（严格 1:1）
+
+> 起因：用户 2026-11-24 对比截图指出阅读区只有滚动、且没有简繁转换。用户拍板：翻页做「无动画 / 滑动 / 覆盖」三档（不做仿真卷页），简繁只做字级 1:1（不做台湾用词替换）；**竖排 / 双栏 / 注音明确不在范围**。
+
+- [x] **视口分页（不重排正文）**：新增 `novelreader/paging.py`；页边界按当前字号 / 行距 / 窗口高度实测显示行，正文、`_line_map`、插图位置、进度口径（`char_offset`=页首偏移）全不动；每页从完整显示行开始，页底被裁的半行用同底色 Canvas 遮住（页首即超高图时不遮）
+- [x] **四档读法**：设置 `page_mode`（`scroll` / `page` 无动画 / `slide` 滑动 / `cover` 覆盖）；切档、换字号、换行距、窗口变化后实时重算并保持当前原文位置
+- [x] **翻页入口**：滚轮、PageUp / PageDown、点击屏幕左/右 1/3（`page_tap_turn` 可关）；章末自动进下一章首页、章首回翻进上一章末页；**空格已被朗读开关占用，未用于翻页**（与原方案差异，已记入交付说明）
+- [x] **朗读联动**：句子已完整落在本页就不动，只在句子跑出页外时整页翻到句首（`_pin_highlight_top` 增分页早退 + `_page_settle_top`）
+- [x] **简繁转换（显示层 1:1）**：新增 `tools/gen_textconv_data.py`、`novelreader/textconv_data.py`（3980/4113 单字 + 9825 s2t 词组 + 258 t2s 词组）、`novelreader/textconv.py`（首字分桶 + 最长匹配 + 长度校验）；纯 Python，不依赖 opencc
+- [x] **显示层口径**：转换只作用于正文渲染与复制，TTS 仍读原文（音频缓存 `content_id/voice/rate` 路径不变）；逐词高亮把 TTS 回吐的 clean 文本按同一模式转换后再对齐；设置 `text_convert`（`none` / `s2t` / `t2s`）即时生效，不动缓存版本
+- [x] **界面**：工具栏第 2b 行「阅读 / 翻页 / 简繁 / 点击翻页」；五语言文案补齐；`storage.DEFAULT_SETTINGS` 加三项默认值
+- [x] **回归**：`tests/test_textconv.py`（等长 / 往返 / 词级消歧 / 随机串 / 性能）、`tests/test_paging.py`（20 页页首对齐 / 边界连续 / 字号窗口重算 / 回翻 / 遮罩行）、`tests/test_page_ui.py`（开书翻页 6 页 + 回翻 + 字号 + 简繁 + 切回滚动）；`compileall`、`test_epub_images`、`test_cache_layout_flow`、`test_word_highlight`、`test_speech_word`、`test_rate_multiplier` 全绿
+
 ### v2.3.2（2026-11-22 归档）：同步按项合并 + 方向拆分（PC / 移动端安卓 + iOS 1.3.4 同批）
 
 > 起因：用户发现「有进度的书在安卓上没同步到 PC」，并指出旧同步是「任一字段更新就整条 PUT 覆盖」，会互相盖掉对端更新。
