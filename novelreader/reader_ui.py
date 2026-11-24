@@ -225,7 +225,15 @@ class ReaderMixin:
         # 轻量同步目录选中态/下拉框（不重建整个列表，避免大目录每次重建）
         self._sync_chapter_sel()
         self._update_status()
-        self._repin_reading()
+        # 朗读中重渲染（切分页/简繁、改字号）：恢复当前句高亮，避免高亮消失后
+        # 看起来「还是没生效」；章节变了则交给随后的 sentence_start 处理。
+        hl_off = getattr(self, "_hl_offset", None)
+        hl_text = getattr(self, "_hl_text", "")
+        hl_ch = getattr(self, "_hl_chapter", None)
+        if hl_off is not None and hl_ch == self.chapter_idx and self.tts.is_playing():
+            self._highlight_sentence(hl_ch, hl_off, hl_text)
+        else:
+            self._repin_reading()
         # 渲染本书书签高亮（划线标注）
         self._apply_bookmark_tags()
         self._rendering = False
@@ -1388,6 +1396,8 @@ class ReaderMixin:
         self.text.tag_add("tts", anchor, end)
         self._highlight_index = (ci, anchor)
         self._hl_offset = int(off)
+        self._hl_chapter = ci
+        self._hl_text = text or ""
         # 逐词高亮上下文：句子在显示文本里的起点 + 该句显示文本 + 朗读（清洗）文本
         disp = ""
         try:
@@ -1454,6 +1464,8 @@ class ReaderMixin:
     def _clear_highlight(self):
         self._highlight_index = None
         self._hl_offset = None
+        self._hl_chapter = None
+        self._hl_text = ""
         self._resize_timer = None
         self._pending_seek_pct = None
         self._status_scroll_timer = None

@@ -150,6 +150,25 @@ def main():
     else:
         check("词越页测试可执行（本页有被裁行）", True)
 
+    print("[tts-page] 朗读中切换分页模式：高亮与页面对齐都保留")
+    app.settings["page_mode"] = "page"
+    app._page_mode_changed()
+    root.update()
+    top, end = app._page_range()
+    off = top + max(1, (end - top) // 2)
+    app.tts.is_playing = lambda: True  # 模拟朗读进行中（不真的出声）
+    app._highlight_sentence(app.chapter_idx, off, "切换模式前句子")
+    app.page_cb.current(2)  # 翻页-滑动
+    app._on_page_mode_change()
+    root.update()
+    hi = getattr(app, "_highlight_index", None)
+    check("切模式后高亮仍在", hi is not None and hi[0] == app.chapter_idx, str(hi))
+    tr, er = app._page_range()
+    check("切模式后高亮仍在页内", tr <= off < er, f"top={tr} end={er} off={off}")
+    app.settings["page_mode"] = "scroll"
+    app._page_mode_changed()
+    root.update()
+
     print("[tts-page] TTS 事件路径 + 滑动/覆盖动画自动翻页")
     for mode in ("slide", "cover"):
         app.settings["page_mode"] = mode
