@@ -86,4 +86,32 @@ _gh_token.txt
 /_pack_tts_probe.*
 # 打包交付的当前版本 zip（release 上有存档，本地只暂存）
 /_*.zip
+/*_Windows_onedir.zip
+
+# PyInstaller onedir 中间目录（build/ dist/ 之外）
+/build_onedir/
+/dist_onedir/
+
+# 自动化测试在项目根留下的临时工作目录（2026-11-24 接管时清理）
+/_tmp_*/
+/dd_btn*/
+/dd_shot*/
+/dd_epub_img*/
+
+# 发布说明草稿、打包脚本日志与校验输出（本地留档，不入库）
+/_release_body_*.md
+/_pack_v2*.*
+/_verify_*.txt
+/_ci*.log
+
+# 图标备份（带日期后缀，*.bak 只匹配整名）
+/assets/*.bak-*/
+
+# 本地宣传/截图素材（大图，随 README 更新，不入库）
+/promo_*.png
+/更新记录_*.png
+/缓存管理_*.png
+/数据同步_*.png
+/语速倍数标注_*.png
+/逐词高亮_*.png
 
