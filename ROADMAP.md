@@ -16,6 +16,7 @@
 - [x] **简繁转换（显示层 1:1）**：新增 `tools/gen_textconv_data.py`、`novelreader/textconv_data.py`（3980/4113 单字 + 9825 s2t 词组 + 258 t2s 词组）、`novelreader/textconv.py`（首字分桶 + 最长匹配 + 长度校验）；纯 Python，不依赖 opencc
 - [x] **显示层口径**：转换只作用于正文渲染与复制，TTS 仍读原文（音频缓存 `content_id/voice/rate` 路径不变）；逐词高亮把 TTS 回吐的 clean 文本按同一模式转换后再对齐；设置 `text_convert`（`none` / `s2t` / `t2s`）即时生效，不动缓存版本
 - [x] **界面**：工具栏第 2b 行「阅读 / 翻页 / 简繁 / 点击翻页」；五语言文案补齐；`storage.DEFAULT_SETTINGS` 加三项默认值
+- [x] **章节标题修复（用户反馈）**：`<h2>第二章<br/><b>青牛镇</b></h2>` 这类标题在纯文本里被 `<br>` 拆成两行，原先只取第一行当标题 → 只显示「第二章」。改为：提取器在标题元素内把 `<br>` 压成空格；EPUB 用整个标题元素作章节名并从正文去掉重复标题行（插图锚点同步前移）；HTML / CHM 同规则；`_guess_chapter_title` 兼容无结构标题的两行合并。新增 `tests/test_title_br.py`
 - [x] **回归**：`tests/test_textconv.py`（等长 / 往返 / 词级消歧 / 随机串 / 性能）、`tests/test_paging.py`（20 页页首对齐 / 边界连续 / 字号窗口重算 / 回翻 / 遮罩行）、`tests/test_page_ui.py`（开书翻页 6 页 + 回翻 + 字号 + 简繁 + 切回滚动）；`compileall`、`test_epub_images`、`test_cache_layout_flow`、`test_word_highlight`、`test_speech_word`、`test_rate_multiplier` 全绿
 
 ### v2.3.2（2026-11-22 归档）：同步按项合并 + 方向拆分（PC / 移动端安卓 + iOS 1.3.4 同批）

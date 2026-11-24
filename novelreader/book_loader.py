@@ -225,16 +225,26 @@ class _TextExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._parts = []
         self._skip = 0
+        self._head = 0
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style"):
             self._skip += 1
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self._head += 1
         if tag in self.BLOCK_TAGS or tag == "br":
-            self._parts.append("\n")
+            # 标题里的 <br> 只是标题内换行（如「第二章<br/>青牛镇」），压成空格，
+            # 否则按行取标题会丢掉后半截。
+            if tag == "br" and self._head > 0:
+                self._parts.append(" ")
+            else:
+                self._parts.append("\n")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style"):
             self._skip = max(0, self._skip - 1)
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self._head = max(0, self._head - 1)
         if tag in self.BLOCK_TAGS:
             self._parts.append("\n")
 
@@ -256,6 +266,50 @@ def _extract_html(raw) -> str:
     except Exception:
         pass
     return p.text()
+
+
+# 标题里的 <br> 在纯文本里会变成换行，按「第一行」取标题就会丢掉后半截
+# （<h2 class="head">第二章<br/><b>青牛镇</b></h2> → 只得到「第二章」）。
+# 这里直接在 HTML 层把整个标题元素压成一行的标题文本。
+_HTML_HEAD_RE = re.compile(r"<(h[1-6])\b[^>]*>(.*?)</\1\s*>", re.S | re.I)
+
+
+def _html_heading_text(raw) -> str:
+    """取页面第一个 h1~h6 的完整标题（<br> 视作空格，保留 <b> 等内联文字）。"""
+    if isinstance(raw, bytes):
+        raw = _decode(raw)
+    if not raw:
+        return ""
+    m = _HTML_HEAD_RE.search(raw)
+    if not m:
+        return ""
+    inner = m.group(2)
+    inner = re.sub(r"<br\s*/?>", " ", inner, flags=re.I)
+    inner = re.sub(r"<[^>]+>", "", inner)
+    import html as _html_mod
+    inner = _html_mod.unescape(inner)
+    inner = re.sub(r"\s+", " ", inner).replace("\u3000", " ").strip()
+    return inner[:80]
+
+
+def _strip_heading_from_body(body: str, title: str) -> str:
+    """从正文开头去掉与标题重复的行（标题两行被 <br> 拆开时逐行合并比对）。"""
+    if not body or not title:
+        return body
+    key = re.sub(r"\s+", "", title)
+    if not key:
+        return body
+    lines = body.split("\n")
+    acc = ""
+    i = 0
+    while i < len(lines) and i < 3:
+        acc += re.sub(r"\s+", "", lines[i])
+        if acc == key:
+            return "\n".join(lines[i + 1:]).lstrip("\n")
+        if not key.startswith(acc):
+            break
+        i += 1
+    return body
 
 
 # ---------------- epub 插图提取 ----------------
@@ -284,11 +338,14 @@ class _ArtExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._parts = []
         self._skip = 0
+        self._head = 0
         self.images = []
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style"):
             self._skip += 1
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self._head += 1
         if tag in ("img", "image"):
             if self._skip == 0:
                 src = ""
@@ -307,11 +364,16 @@ class _ArtExtractor(HTMLParser):
                     self._parts.append(_img_token(len(self.images) - 1))
             return
         if tag in self.BLOCK_TAGS or tag == "br":
-            self._parts.append("\n")
+            if tag == "br" and self._head > 0:
+                self._parts.append(" ")
+            else:
+                self._parts.append("\n")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style"):
             self._skip = max(0, self._skip - 1)
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self._head = max(0, self._head - 1)
         if tag in self.BLOCK_TAGS:
             self._parts.append("\n")
 
@@ -448,28 +510,48 @@ def _chm_js_html_to_text(raw: bytes):
         segs.append(seg)
     htm = "\n".join(segs) if segs else s
 
-    title = ""
-    m = re.search(r"<b[^>]*>(.*?)</b>", htm, re.S | re.I)
-    if not m:
-        m = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", htm, re.S | re.I)
-    if not m:
-        m = re.search(r"<a[^>]*name=[\"']?([^\"'>\s]+)", htm, re.I)
-    if m:
-        t = re.sub(r"<[^>]+>", "", m.group(1))
-        t = t.replace("&nbsp;", " ").strip(" \u3000")
-        if t:
-            title = t
-    return title, _extract_html(htm)
+    title = _html_heading_text(htm)
+    if not title:
+        m = re.search(r"<b[^>]*>(.*?)</b>", htm, re.S | re.I)
+        if not m:
+            m = re.search(r"<a[^>]*name=[\"']?([^\"'>\s]+)", htm, re.I)
+        if m:
+            t = re.sub(r"<[^>]+>", "", m.group(1))
+            t = t.replace("&nbsp;", " ").strip(" \u3000")
+            if t:
+                title = t
+    text = _extract_html(htm)
+    if title:
+        text = _strip_heading_from_body(text, title)
+    return title, text
 
 
 # ---------------- 各格式解析 ----------------
 
 def _guess_chapter_title(text: str, max_len=24):
+    """从正文开头猜标题；标题被 <br> 拆成两行时把后半截并回来（第二章 + 青牛镇）。"""
+    lines = []
     for line in text.split("\n"):
         line = line.strip(" \t\u3000")
         if line:
-            return line[:max_len]
-    return None
+            lines.append(line)
+    if not lines:
+        return None
+    first = lines[0]
+    title = first
+    if re.match(r"^(第\s*[0-9０-９一二三四五六七八九十百千零〇两]+\s*[章节回卷部篇]|Chapter\s+\d+|楔子|序章|引子)", first, re.I) \
+            and len(first) <= max_len:
+        for nxt in lines[1:3]:
+            if len(nxt) > max_len:
+                break
+            if re.search(r"[，。！？；：、,\.!?;:]$", nxt):
+                break
+            if re.match(r"^(第\s*[0-9０-９一二三四五六七八九十百千零〇两]+\s*[章节回卷部篇]|Chapter\s+\d+)", nxt, re.I):
+                break
+            if len(first) + 1 + len(nxt) <= max_len:
+                title = first + " " + nxt
+            break
+    return title[:max_len]
 
 
 def _parse_txt(path):
@@ -631,6 +713,13 @@ def _parse_epub(path, art_dir=None):
             page_txt, srcs = _extract_page_with_art(raw)
             norm = normalize_body(page_txt)
             body, anchors = _split_text_and_art(norm)
+            heading = _html_heading_text(raw)
+            if heading:
+                stripped = _strip_heading_from_body(body, heading)
+                if stripped != body:
+                    delta = len(body) - len(stripped)  # 去掉的前缀长度：插图锚点跟着前移
+                    anchors = [(max(0, off - delta), i) for off, i in anchors]
+                    body = stripped
             imgs = page_images(srcs, page_path)
             if len(body) < 20:
                 # 纯图片页（封面/整页彩插）：不新建章节，图片顺延到下一章章首
@@ -650,7 +739,7 @@ def _parse_epub(path, art_dir=None):
                 art = [(0, n) for n in pending] + art
                 pending = []
             chapters.append(
-                Chapter(_guess_chapter_title(body) or os.path.basename(full), body, art)
+                Chapter(heading or _guess_chapter_title(body) or os.path.basename(full), body, art)
             )
 
         if pending and chapters:
